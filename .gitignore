@@ -70,6 +70,13 @@ dist
 # python binary
 bindings/python/compile_cmd
 
+# python package data
+bindings/python/COPYING
+bindings/python/LICENSE
+bindings/python/setup.py
+bindings/python/include
+bindings/python/lib
+
 # binaries in the examples directory
 examples/bt_get
 examples/bt_get2

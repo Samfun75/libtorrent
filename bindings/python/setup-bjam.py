@@ -71,7 +71,7 @@ if '--help' not in sys.argv \
             toolset = ' toolset=msvc-9.0'
         elif sys.version_info[0:2] in ((3, 3), (3, 4)):
             toolset = ' toolset=msvc-10.0'
-        elif sys.version_info[0:2] in ((3, 5), (3, 6)):
+        elif sys.version_info[0:2] in ((3, 5), (3, 6), (3, 7), (3, 8)):
             toolset = ' toolset=msvc-14.1'  # libtorrent requires VS 2017 or newer
         else:
             # unknown python version, lets hope the user has the right version of msvc configured
@@ -117,16 +117,36 @@ if '--help' not in sys.argv \
     shutil.copyfile('libtorrent' + file_ext,
                     'build/lib/libtorrent' + file_ext)
 
+with open('README.rst') as f:
+    readme = f.read()
+
 setup(
-    name='python-libtorrent',
+    name='libtorrent',
+    description='Python bindings for libtorrent-rasterbar',
+    long_description=readme,
+    license='BSD',
+
     version='2.0.0',
+
+    packages=['libtorrent'],
+    ext_modules=None,
+
     author='Arvid Norberg',
     author_email='arvid@libtorrent.org',
-    description='Python bindings for libtorrent-rasterbar',
-    long_description='Python bindings for libtorrent-rasterbar',
     url='http://libtorrent.org',
-    platforms=[platform.system() + '-' + platform.machine()],
-    license='BSD',
-    packages=['libtorrent'],
-    ext_modules=None
+    keywords='bittorrent, libtorrent, cpp-bindings',
+
+    classifiers=[
+        'Development Status :: 5 - Production/Stable',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: BSD License',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 3',
+        'Topic :: Communications :: File Sharing',
+        'Topic :: Internet',
+        'Topic :: Scientific/Engineering :: Interface Engine/Protocol Translator',
+        'Topic :: Software Development :: Libraries',
+        'Topic :: System :: Networking',
+        'Topic :: Utilities',
+    ],
 )

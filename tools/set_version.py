@@ -47,9 +47,9 @@ def substitute_file(name):
             line = 'VERSION = %d.%d.%d ;\n' % (version[0], version[1], version[2])
         elif 'VERSION=' in line and name.endswith('Makefile'):
             line = 'VERSION=%d.%d.%d\n' % (version[0], version[1], version[2])
-        elif 'version=' in line and name.endswith('setup.py'):
+        elif 'version=' in line and (name.endswith('setup-bjam.py') or name.endswith('setup-pypi.py') or name.endswith('setup.py')):
             line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
-        elif "version = '" in line and name.endswith('setup.py'):
+        elif "version = '" in line and (name.endswith('setup-bjam.py') or name.endswith('setup-pypi.py') or name.endswith('setup.py')):
             line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
         elif '"-LT' in line and name.endswith('settings_pack.cpp'):
             line = re.sub('"-LT[0-9A-Za-z]{4}-"', '"-LT%c%c%c%c-"' % v(version), line)
@@ -63,6 +63,8 @@ def substitute_file(name):
 substitute_file('include/libtorrent/version.hpp')
 substitute_file('Makefile')
 substitute_file('CMakeLists.txt')
+substitute_file('bindings/python/setup-bjam.py')
+substitute_file('bindings/python/setup-pypi.py')
 substitute_file('bindings/python/setup.py')
 substitute_file('docs/gen_reference_doc.py')
 substitute_file('src/settings_pack.cpp')
