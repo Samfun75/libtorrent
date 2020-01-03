@@ -58,8 +58,8 @@ module = Extension(
     libraries=libraries,
     extra_objects=extra_objects,
 
-    extra_compile_args=extra_compile_args,
-    extra_link_args=extra_compile_args,
+    extra_compile_args=extra_compile_args + ['-DTORRENT_BUILDING_SHARED'],
+    extra_link_args=extra_compile_args + ['-DTORRENT_LINKING_SHARED'],
 )
 
 data_files = [('.', ['README.rst', 'COPYING', 'LICENSE'])]
@@ -70,22 +70,22 @@ if 'sdist' in sys.argv:
     data_files.append(('.', glob.glob('src/**/*.[ch]pp', recursive=True)))
 
 setup(
-    name = 'libtorrent',
-    description = 'Python bindings for libtorrent-rasterbar',
-    long_description = readme,
-    license = 'BSD',
+    name='libtorrent',
+    description='Python bindings for libtorrent-rasterbar',
+    long_description=readme,
+    license='BSD',
 
-    version = '2.0.0',
+    version='2.0.0',
 
-    ext_modules = [module],
-    data_files = data_files,
+    ext_modules=[module],
+    data_files=data_files,
 
-    author = 'Arvid Norberg',
-    author_email = 'arvid@libtorrent.org',
-    url = 'http://libtorrent.org',
-    keywords = 'bittorrent, libtorrent, cpp-bindings',
+    author='Arvid Norberg',
+    author_email='arvid@libtorrent.org',
+    url='http://libtorrent.org',
+    keywords='bittorrent, libtorrent, cpp-bindings',
 
-    classifiers = [
+    classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: BSD License',

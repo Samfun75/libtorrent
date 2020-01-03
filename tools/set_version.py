@@ -47,9 +47,9 @@ def substitute_file(name):
             line = 'VERSION = %d.%d.%d ;\n' % (version[0], version[1], version[2])
         elif 'VERSION=' in line and name.endswith('Makefile'):
             line = 'VERSION=%d.%d.%d\n' % (version[0], version[1], version[2])
-        elif 'version=' in line and (name.endswith('setup-bjam.py') or name.endswith('setup-pypi.py') or name.endswith('setup.py')):
+        elif 'version=' in line and name.endswith(('setup-bjam.py', 'setup-pypi.py', 'setup.py')):
             line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
-        elif "version = '" in line and (name.endswith('setup-bjam.py') or name.endswith('setup-pypi.py') or name.endswith('setup.py')):
+        elif "version = '" in line and name.endswith(('setup-bjam.py', 'setup-pypi.py', 'setup.py')):
             line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
         elif '"-LT' in line and name.endswith('settings_pack.cpp'):
             line = re.sub('"-LT[0-9A-Za-z]{4}-"', '"-LT%c%c%c%c-"' % v(version), line)
