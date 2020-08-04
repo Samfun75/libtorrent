@@ -60,7 +60,7 @@ namespace aux {
 	// by ``out`` is large enough, i.e. has at least len * 2 bytes of space.
 	TORRENT_CONDITIONAL_EXPORT std::string to_hex(span<char const> s);
 	TORRENT_CONDITIONAL_EXPORT void to_hex(span<char const> in, char* out);
-	TORRENT_CONDITIONAL_EXPORT void to_hex(char const* in, int const len, char* out);
+	TORRENT_CONDITIONAL_EXPORT void to_hex(char const* in, int len, char* out);
 
 	// converts the buffer [``in``, ``in`` + len) from hexadecimal to
 	// binary. The binary output is written to the buffer pointed to
@@ -71,20 +71,11 @@ namespace aux {
 
 #undef TORRENT_CONDITIONAL_EXPORT
 
-
 } // namespace aux
 
 #if TORRENT_ABI_VERSION == 1
 
-#ifdef _MSC_VER
-#pragma warning(push, 1)
-// warning C4996: X: was declared deprecated
-#pragma warning( disable : 4996 )
-#endif
-#if defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
 
 	// deprecated in 1.2
 	TORRENT_DEPRECATED
@@ -97,12 +88,7 @@ namespace aux {
 	inline bool from_hex(char const *in, int len, char* out)
 	{ return aux::from_hex({in, len}, out); }
 
-#if defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 #endif
 } // namespace libtorrent

@@ -106,10 +106,18 @@ namespace libtorrent {
 #define DEPRECATED_SET_STR(name, default_value, fun) { "", nullptr, nullptr }
 #endif
 
+		// tested to fail with _MSC_VER <= 1916. The actual version condition
+#if !defined _MSC_VER
+#define CONSTEXPR_SETTINGS constexpr
+#else
+#define CONSTEXPR_SETTINGS
+#endif
+
 	namespace {
 
 	using aux::session_impl;
 
+	CONSTEXPR_SETTINGS
 	aux::array<str_setting_entry_t, settings_pack::num_string_settings> const str_settings
 	({{
 		SET(user_agent, "libtorrent/" LIBTORRENT_VERSION, &session_impl::update_user_agent),
@@ -123,9 +131,11 @@ namespace libtorrent {
 		SET(proxy_password, "", &session_impl::update_proxy),
 		SET(i2p_hostname, "", &session_impl::update_i2p_bridge),
 		SET(peer_fingerprint, "-LT2000-", nullptr),
-		SET(dht_bootstrap_nodes, "dht.libtorrent.org:25401", &session_impl::update_dht_bootstrap_nodes)
+		SET(dht_bootstrap_nodes, "dht.libtorrent.org:25401", &session_impl::update_dht_bootstrap_nodes),
+		SET(webtorrent_stun_server, "stun.l.google.com:19302", nullptr)
 	}});
 
+	CONSTEXPR_SETTINGS
 	aux::array<bool_setting_entry_t, settings_pack::num_bool_settings> const bool_settings
 	({{
 		SET(allow_multiple_connections_per_ip, false, nullptr),
@@ -148,7 +158,7 @@ namespace libtorrent {
 		SET(announce_to_all_trackers, false, nullptr),
 		SET(announce_to_all_tiers, false, nullptr),
 		SET(prefer_udp_trackers, true, nullptr),
-		SET(strict_super_seeding, false, nullptr),
+		DEPRECATED_SET(strict_super_seeding, false, nullptr),
 		DEPRECATED_SET(lock_disk_cache, false, nullptr),
 		SET(disable_hash_checks, false, nullptr),
 		SET(allow_i2p_mixed, false, nullptr),
@@ -159,14 +169,14 @@ namespace libtorrent {
 		SET(incoming_starts_queued_torrents, false, nullptr),
 		SET(report_true_downloaded, false, nullptr),
 		SET(strict_end_game_mode, true, nullptr),
-		SET(broadcast_lsd, true, nullptr),
+		DEPRECATED_SET(broadcast_lsd, true, nullptr),
 		SET(enable_outgoing_utp, true, nullptr),
 		SET(enable_incoming_utp, true, nullptr),
 		SET(enable_outgoing_tcp, true, nullptr),
 		SET(enable_incoming_tcp, true, nullptr),
 		SET(ignore_resume_timestamps, false, nullptr),
 		SET(no_recheck_incomplete_resume, false, nullptr),
-		SET(anonymous_mode, false, &session_impl::update_anonymous_mode),
+		SET(anonymous_mode, false, nullptr),
 		SET(report_web_seed_downloads, true, &session_impl::update_report_web_seed_downloads),
 		DEPRECATED_SET(rate_limit_utp, true, &session_impl::update_rate_limit_utp),
 		DEPRECATED_SET(announce_double_nat, false, nullptr),
@@ -207,8 +217,10 @@ namespace libtorrent {
 		SET(dht_ignore_dark_internet, true, nullptr),
 		SET(dht_read_only, false, nullptr),
 		SET(piece_extent_affinity, false, nullptr),
+		SET(validate_https_trackers, false, &session_impl::update_validate_https),
 	}});
 
+	CONSTEXPR_SETTINGS
 	aux::array<int_setting_entry_t, settings_pack::num_int_settings> const int_settings
 	({{
 		SET(tracker_completion_timeout, 30, nullptr),
@@ -294,7 +306,7 @@ namespace libtorrent {
 		SET(download_rate_limit, 0, &session_impl::update_download_rate),
 		DEPRECATED_SET(local_upload_rate_limit, 0, &session_impl::update_local_upload_rate),
 		DEPRECATED_SET(local_download_rate_limit, 0, &session_impl::update_local_download_rate),
-		SET(dht_upload_rate_limit, 8000, nullptr),
+		SET(dht_upload_rate_limit, 8000, &session_impl::update_dht_upload_rate_limit),
 		SET(unchoke_slots_limit, 8, &session_impl::update_unchoke_limit),
 		DEPRECATED_SET(half_open_limit, 0, nullptr),
 		SET(connections_limit, 200, &session_impl::update_connections_limit),
@@ -311,12 +323,12 @@ namespace libtorrent {
 		SET(mixed_mode_algorithm, settings_pack::peer_proportional, nullptr),
 		SET(listen_queue_size, 5, nullptr),
 		SET(torrent_connect_boost, 30, nullptr),
-		SET(alert_queue_size, 1000, &session_impl::update_alert_queue_size),
+		SET(alert_queue_size, 2000, &session_impl::update_alert_queue_size),
 		SET(max_metadata_size, 3 * 1024 * 10240, nullptr),
-		DEPRECATED_SET(hashing_threads, 1, nullptr),
-		SET(checking_mem_usage, 1024, nullptr),
+		SET(hashing_threads, 2, &session_impl::update_disk_threads),
+		SET(checking_mem_usage, 256, nullptr),
 		SET(predictive_piece_announce, 0, nullptr),
-		SET(aio_threads, 4, &session_impl::update_disk_threads),
+		SET(aio_threads, 10, &session_impl::update_disk_threads),
 		DEPRECATED_SET(aio_max, 300, nullptr),
 		DEPRECATED_SET(network_threads, 0, nullptr),
 		DEPRECATED_SET(ssl_listen, 0, &session_impl::update_ssl_listen),
@@ -329,7 +341,7 @@ namespace libtorrent {
 		SET(connect_seed_every_n_download, 10, nullptr),
 		SET(max_http_recv_buffer_size, 4*1024*204, nullptr),
 		SET(max_retry_port_bind, 10, nullptr),
-		SET(alert_mask, int(static_cast<std::uint32_t>(alert::error_notification)), &session_impl::update_alert_mask),
+		SET(alert_mask, int(static_cast<std::uint32_t>(alert_category::error)), &session_impl::update_alert_mask),
 		SET(out_enc_policy, settings_pack::pe_enabled, nullptr),
 		SET(in_enc_policy, settings_pack::pe_enabled, nullptr),
 		SET(allowed_enc_level, settings_pack::pe_both, nullptr),
@@ -345,6 +357,10 @@ namespace libtorrent {
 		SET(utp_cwnd_reduce_timer, 100, nullptr),
 		SET(max_web_seed_connections, 3, nullptr),
 		SET(resolver_cache_timeout, 1200, &session_impl::update_resolver_cache_timeout),
+		SET(send_not_sent_low_watermark, 16384, nullptr),
+		SET(rate_choker_initial_threshold, 1024, nullptr),
+		SET(upnp_lease_duration, 3600, nullptr),
+		SET(max_concurrent_http_announces, 50, nullptr),
 		SET(dht_max_peers_reply, 100, nullptr),
 		SET(dht_search_branching, 5, nullptr),
 		SET(dht_max_fail_count, 20, nullptr),
@@ -357,11 +373,14 @@ namespace libtorrent {
 		SET(dht_item_lifetime, 0, nullptr),
 		SET(dht_sample_infohashes_interval, 21600, nullptr),
 		SET(dht_max_infohashes_sample_count, 20, nullptr),
-
+		SET(max_piece_count, 0x200000, nullptr),
+		SET(min_websocket_announce_interval, 1 * 60, nullptr),
+		SET(webtorrent_connection_timeout, 2 * 60, nullptr)
 	}});
 
 #undef SET
 #undef DEPRECATED_SET
+#undef CONSTEXPR_SETTINGS
 
 	} // anonymous namespace
 
@@ -436,7 +455,7 @@ namespace libtorrent {
 				for (int k = 0; k < str_settings.end_index(); ++k)
 				{
 					if (key != str_settings[k].name) continue;
-					pack.set_str(settings_pack::string_type_base + k, val.string_value().to_string());
+					pack.set_str(settings_pack::string_type_base + k, std::string(val.string_value()));
 					break;
 				}
 				break;

@@ -36,18 +36,18 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "libtorrent/config.hpp"
-#include "libtorrent/bt_peer_connection.hpp"
+#include "libtorrent/aux_/bt_peer_connection.hpp"
 #include "libtorrent/peer_connection_handle.hpp"
 #include "libtorrent/bencode.hpp"
-#include "libtorrent/torrent.hpp"
+#include "libtorrent/aux_/torrent.hpp"
 #include "libtorrent/extensions.hpp"
-#include "libtorrent/broadcast_socket.hpp"
 #include "libtorrent/socket_io.hpp"
 #include "libtorrent/peer_info.hpp"
 #include "libtorrent/aux_/socket_type.hpp" // for is_utp
 #include "libtorrent/performance_counters.hpp" // for counters
 #include "libtorrent/extensions/ut_pex.hpp"
 #include "libtorrent/aux_/time.hpp"
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_v4
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 
@@ -80,10 +80,13 @@ namespace libtorrent { namespace {
 		// to evenly spread it out across all torrents
 		// the more torrents we have, the longer we can
 		// delay the rebuilding
-		explicit ut_pex_plugin(torrent& t)
+		explicit ut_pex_plugin(aux::torrent& t)
 			: m_torrent(t)
 			, m_last_msg(min_time())
 			, m_peers_in_message(0) {}
+
+		// explicitly disallow assignment, to silence msvc warning
+		ut_pex_plugin& operator=(ut_pex_plugin const&) = delete;
 
 		std::shared_ptr<peer_plugin> new_connection(
 			peer_connection_handle const& pc) override;
@@ -132,7 +135,7 @@ namespace libtorrent { namespace {
 
 			m_peers_in_message = 0;
 			int num_added = 0;
-			for (auto const peer : m_torrent)
+			for (auto const* peer : m_torrent)
 			{
 				if (!send_peer(*peer)) continue;
 
@@ -149,7 +152,7 @@ namespace libtorrent { namespace {
 					if (peer->type() != connection_type::bittorrent)
 						continue;
 
-					auto const* const p = static_cast<bt_peer_connection const*>(peer);
+					auto const* const p = static_cast<aux::bt_peer_connection const*>(peer);
 
 					// if the peer has told us which port its listening on,
 					// use that port. But only if we didn't connect to the peer.
@@ -179,7 +182,7 @@ namespace libtorrent { namespace {
 					flags |= p->supports_holepunch() ? pex_holepunch : pex_flags_t{};
 
 					// i->first was added since the last time
-					if (is_v4(remote))
+					if (aux::is_v4(remote))
 					{
 						aux::write_endpoint(remote, pla_out);
 						aux::write_uint8(static_cast<std::uint8_t>(flags), plf_out);
@@ -202,7 +205,7 @@ namespace libtorrent { namespace {
 
 			for (auto const& i : dropped)
 			{
-				if (is_v4(i))
+				if (aux::is_v4(i))
 					aux::write_endpoint(i, pld_out);
 				else
 					aux::write_endpoint(i, pld6_out);
@@ -214,21 +217,18 @@ namespace libtorrent { namespace {
 		}
 
 	private:
-		torrent& m_torrent;
+		aux::torrent& m_torrent;
 
 		std::set<tcp::endpoint> m_old_peers;
 		time_point m_last_msg;
 		std::vector<char> m_ut_pex_msg;
 		int m_peers_in_message;
-
-		// explicitly disallow assignment, to silence msvc warning
-		ut_pex_plugin& operator=(ut_pex_plugin const&) = delete;
 	};
 
 	struct ut_pex_peer_plugin final
-		: ut_pex_peer_store, peer_plugin
+		: aux::ut_pex_peer_store, peer_plugin
 	{
-		ut_pex_peer_plugin(torrent& t, peer_connection& pc, ut_pex_plugin& tp)
+		ut_pex_peer_plugin(aux::torrent& t, peer_connection& pc, ut_pex_plugin& tp)
 			: m_torrent(t)
 			, m_pc(pc)
 			, m_tp(tp)
@@ -242,6 +242,9 @@ namespace libtorrent { namespace {
 				m_last_pex[i] = min_time();
 			}
 		}
+
+		// explicitly disallow assignment, to silence msvc warning
+		ut_pex_peer_plugin& operator=(ut_pex_peer_plugin const&) = delete;
 
 		void add_handshake(entry& h) override
 		{
@@ -314,7 +317,7 @@ namespace libtorrent { namespace {
 
 				for (int i = 0; i < num_peers; ++i)
 				{
-					tcp::endpoint const adr = aux::read_v4_endpoint<tcp::endpoint>(in);
+					auto const adr = aux::read_v4_endpoint<tcp::endpoint>(in);
 					peers4_t::value_type const v(adr.address().to_v4().to_bytes(), adr.port());
 					auto const j = std::lower_bound(m_peers.begin(), m_peers.end(), v);
 					if (j != m_peers.end() && *j == v) m_peers.erase(j);
@@ -336,7 +339,7 @@ namespace libtorrent { namespace {
 
 				for (int i = 0; i < num_peers; ++i)
 				{
-					tcp::endpoint const adr = aux::read_v4_endpoint<tcp::endpoint>(in);
+					auto const adr = aux::read_v4_endpoint<tcp::endpoint>(in);
 					pex_flags_t flags(static_cast<std::uint8_t>(*fin++));
 
 					if (m_pc.peer_info_struct()->protocol_v2)
@@ -346,7 +349,7 @@ namespace libtorrent { namespace {
 						break;
 
 					// ignore local addresses unless the peer is local to us
-					if (is_local(adr.address()) && !is_local(m_pc.remote().address())) continue;
+					if (aux::is_local(adr.address()) && !aux::is_local(m_pc.remote().address())) continue;
 
 					peers4_t::value_type const v(adr.address().to_v4().to_bytes(), adr.port());
 					auto const j = std::lower_bound(m_peers.begin(), m_peers.end(), v);
@@ -369,7 +372,7 @@ namespace libtorrent { namespace {
 
 				for (int i = 0; i < num_peers; ++i)
 				{
-					tcp::endpoint const adr = aux::read_v6_endpoint<tcp::endpoint>(in);
+					auto const adr = aux::read_v6_endpoint<tcp::endpoint>(in);
 					peers6_t::value_type const v(adr.address().to_v6().to_bytes(), adr.port());
 					auto const j = std::lower_bound(m_peers6.begin(), m_peers6.end(), v);
 					if (j != m_peers6.end() && *j == v) m_peers6.erase(j);
@@ -389,14 +392,14 @@ namespace libtorrent { namespace {
 
 				for (int i = 0; i < num_peers; ++i)
 				{
-					tcp::endpoint const adr = aux::read_v6_endpoint<tcp::endpoint>(in);
+					auto const adr = aux::read_v6_endpoint<tcp::endpoint>(in);
 					pex_flags_t flags(static_cast<std::uint8_t>(*fin++));
 
 					if (m_pc.peer_info_struct()->protocol_v2)
 						flags |= pex_lt_v2;
 
 					// ignore local addresses unless the peer is local to us
-					if (is_local(adr.address()) && !is_local(m_pc.remote().address())) continue;
+					if (aux::is_local(adr.address()) && !aux::is_local(m_pc.remote().address())) continue;
 					if (int(m_peers6.size()) >= m_torrent.settings().get_int(settings_pack::max_pex_peers))
 						break;
 
@@ -488,7 +491,7 @@ namespace libtorrent { namespace {
 			char* ptr = msg;
 
 			aux::write_uint32(1 + 1 + int(pex_msg.size()), ptr);
-			aux::write_uint8(bt_peer_connection::msg_extended, ptr);
+			aux::write_uint8(aux::bt_peer_connection::msg_extended, ptr);
 			aux::write_uint8(m_message_index, ptr);
 			m_pc.send_buffer(msg);
 			m_pc.send_buffer(pex_msg);
@@ -540,7 +543,7 @@ namespace libtorrent { namespace {
 			std::back_insert_iterator<std::string> plf6_out(plf6);
 
 			int num_added = 0;
-			for (auto const peer : m_torrent)
+			for (auto const* peer : m_torrent)
 			{
 				if (!send_peer(*peer)) continue;
 
@@ -551,7 +554,7 @@ namespace libtorrent { namespace {
 				if (peer->type() != connection_type::bittorrent)
 					continue;
 
-				auto const* const p = static_cast<bt_peer_connection const*>(peer);
+				auto const* const p = static_cast<aux::bt_peer_connection const*>(peer);
 
 				// no supported flags to set yet
 				// 0x01 - peer supports encryption
@@ -580,7 +583,7 @@ namespace libtorrent { namespace {
 				}
 
 				// i->first was added since the last time
-				if (is_v4(remote))
+				if (aux::is_v4(remote))
 				{
 					aux::write_endpoint(remote, pla_out);
 					aux::write_uint8(flags, plf_out);
@@ -599,7 +602,7 @@ namespace libtorrent { namespace {
 			char* ptr = msg;
 
 			aux::write_uint32(1 + 1 + int(pex_msg.size()), ptr);
-			aux::write_uint8(bt_peer_connection::msg_extended, ptr);
+			aux::write_uint8(aux::bt_peer_connection::msg_extended, ptr);
 			aux::write_uint8(m_message_index, ptr);
 			m_pc.send_buffer(msg);
 			m_pc.send_buffer(pex_msg);
@@ -613,7 +616,7 @@ namespace libtorrent { namespace {
 #endif
 		}
 
-		torrent& m_torrent;
+		aux::torrent& m_torrent;
 		peer_connection& m_pc;
 		ut_pex_plugin& m_tp;
 
@@ -634,16 +637,13 @@ namespace libtorrent { namespace {
 		// it is used to know if a diff message or a) ful
 		// message should be sent.
 		bool m_first_time;
-
-		// explicitly disallow assignment, to silence msvc warning
-		ut_pex_peer_plugin& operator=(ut_pex_peer_plugin const&) = delete;
 	};
 
 	std::shared_ptr<peer_plugin> ut_pex_plugin::new_connection(peer_connection_handle const& pc)
 	{
 		if (pc.type() != connection_type::bittorrent) return {};
 
-		bt_peer_connection* c = static_cast<bt_peer_connection*>(pc.native_handle().get());
+		aux::bt_peer_connection* c = static_cast<aux::bt_peer_connection*>(pc.native_handle().get());
 		auto p = std::make_shared<ut_pex_peer_plugin>(m_torrent, *c, *this);
 		c->set_ut_pex(p);
 		return p;
@@ -652,9 +652,9 @@ namespace libtorrent { namespace {
 
 namespace libtorrent {
 
-	std::shared_ptr<torrent_plugin> create_ut_pex_plugin(torrent_handle const& th, void*)
+	std::shared_ptr<torrent_plugin> create_ut_pex_plugin(torrent_handle const& th, client_data_t)
 	{
-		torrent* t = th.native_handle().get();
+		aux::torrent* t = th.native_handle().get();
 		if (t->torrent_file().priv() || (t->torrent_file().is_i2p()
 			&& !t->settings().get_bool(settings_pack::allow_i2p_mixed)))
 		{

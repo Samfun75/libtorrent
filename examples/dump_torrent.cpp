@@ -54,6 +54,7 @@ void print_usage()
     --show-padfiles          show pad files in file list
     --max-pieces <count>     set the upper limit on the number of pieces to
                              load in the torrent.
+    --max-size <size in MiB> reject files larger than this size limit
 )";
 	std::exit(1);
 }
@@ -92,6 +93,11 @@ int main(int argc, char const* argv[]) try
 			cfg.max_pieces = atoi(args[1]);
 			args = args.subspan(2);
 		}
+		else if (args[0] == "--max-size"_sv && args.size() > 1)
+		{
+			cfg.max_buffer_size = atoi(args[1]) * 1024 * 1024;
+			args = args.subspan(2);
+		}
 		else if (args[0] == "--show-padfiles"_sv)
 		{
 			show_pad = true;
@@ -122,9 +128,9 @@ int main(int argc, char const* argv[]) try
 	}
 
 	std::stringstream ih;
-	ih << t.info_hash().v1;
-	if (t.info_hash().has_v2())
-		ih << ", " << t.info_hash().v2;
+	ih << t.info_hashes().v1;
+	if (t.info_hashes().has_v2())
+		ih << ", " << t.info_hashes().v2;
 	std::printf("number of pieces: %d\n"
 		"piece length: %d\n"
 		"info hash: %s\n"

@@ -40,7 +40,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "bittorrent_peer.hpp"
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/io_context.hpp"
-#include "libtorrent/io.hpp"
+#include "libtorrent/aux_/io_bytes.hpp"
 #include "libtorrent/random.hpp"
 
 #include <cstdlib>
@@ -86,7 +86,7 @@ void peer_conn::on_connect(error_code const& ec)
 		"\0\0\0\x01\x02"; // interested
 	char* h = static_cast<char*>(malloc(sizeof(handshake)));
 	memcpy(h, handshake, sizeof(handshake));
-	std::memcpy(h + 28, m_ti.info_hash().v1.data(), 20);
+	std::memcpy(h + 28, m_ti.info_hash().data(), 20);
 	lt::aux::random_bytes({h + 48, 20});
 	// for seeds, don't send the interested message
 	boost::asio::async_write(s, boost::asio::buffer(h, (sizeof(handshake) - 1)

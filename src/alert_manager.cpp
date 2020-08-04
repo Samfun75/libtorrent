@@ -34,7 +34,7 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "libtorrent/config.hpp"
-#include "libtorrent/alert_manager.hpp"
+#include "libtorrent/aux_/alert_manager.hpp"
 #include "libtorrent/alert_types.hpp"
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
@@ -43,6 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 namespace libtorrent {
+namespace aux {
 
 	alert_manager::alert_manager(int const queue_limit, alert_category_t const alert_mask)
 		: m_alert_mask(alert_mask)
@@ -110,7 +111,11 @@ namespace libtorrent {
 	{
 		std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-		if (m_alerts[m_generation].empty()) return;
+		if (m_alerts[m_generation].empty())
+		{
+			alerts.clear();
+			return;
+		}
 
 		if (m_dropped.any()) {
 			emplace_alert<alerts_dropped_alert>(m_dropped);
@@ -139,4 +144,5 @@ namespace libtorrent {
 		std::swap(m_queue_size_limit, queue_size_limit_);
 		return queue_size_limit_;
 	}
+}
 }

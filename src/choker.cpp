@@ -34,17 +34,18 @@ POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "libtorrent/choker.hpp"
+#include "libtorrent/aux_/choker.hpp"
 #include "libtorrent/peer_connection.hpp"
 #include "libtorrent/aux_/session_settings.hpp"
 #include "libtorrent/aux_/time.hpp"
-#include "libtorrent/torrent.hpp"
+#include "libtorrent/aux_/torrent.hpp"
 
 #include <functional>
 
 using namespace std::placeholders;
 
 namespace libtorrent {
+namespace aux {
 
 namespace {
 
@@ -82,8 +83,8 @@ namespace {
 		// peers that are unchoked, but have sent more than one quota
 		// since they were unchoked, they get de-prioritized.
 
-		std::shared_ptr<torrent> const t1 = lhs->associated_torrent().lock();
-		std::shared_ptr<torrent> const t2 = rhs->associated_torrent().lock();
+		auto const t1 = lhs->associated_torrent().lock();
+		auto const t2 = rhs->associated_torrent().lock();
 		TORRENT_ASSERT(t1);
 		TORRENT_ASSERT(t2);
 
@@ -201,33 +202,9 @@ namespace {
 		return c1 > c2;
 	}
 
-	bool bittyrant_unchoke_compare(peer_connection const* lhs
-		, peer_connection const* rhs)
-	{
-		// first compare how many bytes they've sent us
-		std::int64_t d1 = lhs->downloaded_in_last_round();
-		std::int64_t d2 = rhs->downloaded_in_last_round();
-		// divided by the number of bytes we've sent them
-		std::int64_t const u1 = lhs->uploaded_in_last_round();
-		std::int64_t const u2 = rhs->uploaded_in_last_round();
-
-		// take torrent priority into account
-		d1 *= lhs->get_priority(peer_connection::upload_channel);
-		d2 *= rhs->get_priority(peer_connection::upload_channel);
-
-		d1 = d1 * 1000 / std::max(std::int64_t(1), u1);
-		d2 = d2 * 1000 / std::max(std::int64_t(1), u2);
-		if (d1 != d2) return d1 > d2;
-
-		// if both peers are still in their send quota or not in their send quota
-		// prioritize the one that has waited the longest to be unchoked
-		return lhs->time_of_last_unchoke() < rhs->time_of_last_unchoke();
-	}
-
 	} // anonymous namespace
 
 	int unchoke_sort(std::vector<peer_connection*>& peers
-		, int const max_upload_rate
 		, time_duration const unchoke_interval
 		, aux::session_settings const& sett)
 	{
@@ -238,62 +215,6 @@ namespace {
 			TORRENT_ASSERT(p->associated_torrent().lock());
 		}
 #endif
-
-		// ==== BitTyrant ====
-		//
-		// if we're using the bittyrant unchoker, go through all peers that
-		// we have unchoked already, and adjust our estimated reciprocation
-		// rate. If the peer has reciprocated, lower the estimate, if it hasn't,
-		// increase the estimate (this attempts to optimize "ROI" of upload
-		// capacity, by sending just enough to be reciprocated).
-		// For more information, see: http://bittyrant.cs.washington.edu/
-		if (sett.get_int(settings_pack::choking_algorithm)
-			== settings_pack::bittyrant_choker)
-		{
-			for (auto const p : peers)
-			{
-				if (p->is_choked() || !p->is_interesting()) continue;
-
-				if (!p->has_peer_choked())
-				{
-					// we're unchoked, we may want to lower our estimated
-					// reciprocation rate
-					p->decrease_est_reciprocation_rate();
-				}
-				else
-				{
-					// we've unchoked this peer, and it hasn't reciprocated
-					// we may want to increase our estimated reciprocation rate
-					p->increase_est_reciprocation_rate();
-				}
-			}
-
-			// if we're using the bittyrant choker, sort peers by their return
-			// on investment. i.e. download rate / upload rate
-			// TODO: use an incremental partial_sort() here
-			std::sort(peers.begin(), peers.end()
-				, [](peer_connection const* lhs, peer_connection const* rhs)
-				{ return bittyrant_unchoke_compare(lhs, rhs); } );
-
-			int upload_capacity_left = max_upload_rate;
-
-			// now, figure out how many peers should be unchoked. We deduct the
-			// estimated reciprocation rate from our upload_capacity estimate
-			// until there none left
-			int upload_slots = 0;
-
-			for (auto const p : peers)
-			{
-				TORRENT_ASSERT(p != nullptr);
-
-				if (p->est_reciprocation_rate() > upload_capacity_left) break;
-
-				++upload_slots;
-				upload_capacity_left -= p->est_reciprocation_rate();
-			}
-
-			return upload_slots;
-		}
 
 		int upload_slots = sett.get_int(settings_pack::unchoke_slots_limit);
 		if (upload_slots < 0)
@@ -306,8 +227,8 @@ namespace {
 		// intention is to not spread upload bandwidth too thin, but also to not
 		// unchoke few enough peers to not be able to saturate the up-link.
 		// this is done by traversing the peers sorted by our upload rate to
-		// them in decreasing rates. For each peer we increase our threshold
-		// by 1 kB/s. The first peer we get to whom we upload slower than
+		// them in decreasing rates. For each peer we increase the threshold by
+		// 2 kiB/s. The first peer we get to whom we upload slower than
 		// the threshold, we stop and that's the number of unchoke slots we have.
 		if (sett.get_int(settings_pack::choking_algorithm)
 			== settings_pack::rate_based_choker)
@@ -316,27 +237,24 @@ namespace {
 			// it purely based on the current state of our peers.
 			upload_slots = 0;
 
-			// TODO: use an incremental partial_sort() here. We don't need
-			// to sort the entire list
+			int rate_threshold = sett.get_int(settings_pack::rate_choker_initial_threshold);
 
 			std::sort(peers.begin(), peers.end()
 				, [](peer_connection const* lhs, peer_connection const* rhs)
 				{ return upload_rate_compare(lhs, rhs); });
 
-			// TODO: make configurable
-			int rate_threshold = 1024;
-
-			for (auto const p : peers)
+			for (auto const* p : peers)
 			{
 				int const rate = int(p->uploaded_in_last_round()
 					* 1000 / total_milliseconds(unchoke_interval));
 
+				// always have at least 1 unchoke slot
 				if (rate < rate_threshold) break;
 
 				++upload_slots;
 
 				// TODO: make configurable
-				rate_threshold += 1024;
+				rate_threshold += 2048;
 			}
 			++upload_slots;
 		}
@@ -391,4 +309,5 @@ namespace {
 		return upload_slots;
 	}
 
+}
 }

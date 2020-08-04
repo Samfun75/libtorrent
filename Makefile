@@ -11,32 +11,32 @@ ifneq ($(OS),Windows_NT)
 	endif
 endif
 
-BUILD_CONFIG=release cxxstd=14 link=shared crypto=openssl warnings=off -j${NCORES}
+BUILD_CONFIG=release cxxstd=17 link=shared crypto=openssl warnings=off -j${NCORES}
 
 ifeq (${PREFIX},)
 PREFIX=/usr/local/
 endif
 
 ALL: FORCE
-	BOOST_ROOT="" bjam ${BUILD_CONFIG}
+	BOOST_ROOT="" b2 ${BUILD_CONFIG}
 
 python-binding: FORCE
-	(cd bindings/python; BOOST_ROOT="" bjam ${BUILD_CONFIG} stage_module stage_dependencies)
+	(cd bindings/python; BOOST_ROOT="" b2 ${BUILD_CONFIG} stage_module stage_dependencies)
 
 examples: FORCE
-	(cd examples; BOOST_ROOT="" bjam ${BUILD_CONFIG} stage_client_test stage_connection_tester)
+	(cd examples; BOOST_ROOT="" b2 ${BUILD_CONFIG} stage_client_test stage_connection_tester)
 
 tools: FORCE
-	(cd tools; BOOST_ROOT="" bjam ${BUILD_CONFIG})
+	(cd tools; BOOST_ROOT="" b2 ${BUILD_CONFIG})
 
 install: FORCE
-	BOOST_ROOT="" bjam ${BUILD_CONFIG} install --prefix=${PREFIX}
+	BOOST_ROOT="" b2 ${BUILD_CONFIG} install --prefix=${PREFIX}
 
 sim: FORCE
-	(cd simulation; BOOST_ROOT="" bjam $(filter-out crypto=openssl,${BUILD_CONFIG}) crypto=built-in)
+	(cd simulation; BOOST_ROOT="" b2 $(filter-out crypto=openssl,${BUILD_CONFIG}) crypto=built-in)
 
 check: FORCE
-	(cd test; BOOST_ROOT="" bjam crypto=openssl warnings=off -j${NCORES})
+	(cd test; BOOST_ROOT="" b2 crypto=openssl warnings=off -j${NCORES})
 
 clean: FORCE
 	rm -rf \
@@ -49,44 +49,33 @@ clean: FORCE
     simulator/libsimulator/bin
 
 DOCS_IMAGES = \
-  docs/client_test.png            \
-  docs/cwnd.png                   \
-  docs/cwnd_thumb.png             \
-  docs/delays.png                 \
-  docs/delays_thumb.png           \
-  docs/hacking.html               \
-  docs/merkle_tree.png            \
-  docs/our_delay_base.png         \
-  docs/our_delay_base_thumb.png   \
-  docs/read_disk_buffers.png      \
-  docs/read_disk_buffers.diagram  \
-  docs/storage.png                \
-  docs/todo.html                  \
-  docs/write_disk_buffers.png     \
-  docs/write_disk_buffers.diagram \
-  docs/ip_id_v4.png               \
-  docs/ip_id_v6.png               \
-  docs/hash_distribution.png      \
-  docs/complete_bit_prefixes.png  \
-  docs/troubleshooting.dot        \
-  docs/troubleshooting.png        \
-  docs/troubleshooting_thumb.png  \
-  docs/hacking.diagram            \
-  docs/hacking.png                \
-  docs/disk_cache.diagram         \
-  docs/disk_cache.png             \
-  docs/utp_stack.diagram          \
-  docs/utp_stack.png              \
-  docs/bitcoin.png                \
-  docs/style.css                  \
-  docs/rst.css                    \
-  docs/img/bg.png                 \
-  docs/img/blue_bottom.png        \
-  docs/img/blue_top.png           \
-  docs/img/dotline.gif            \
-  docs/img/minus.gif              \
-  docs/img/orange.png             \
-  docs/join_rst.py
+  docs/img/screenshot.png             \
+  docs/img/screenshot_thumb.png       \
+  docs/img/cwnd.png                   \
+  docs/img/cwnd_thumb.png             \
+  docs/img/delays.png                 \
+  docs/img/delays_thumb.png           \
+  docs/img/our_delay_base.png         \
+  docs/img/our_delay_base_thumb.png   \
+  docs/img/read_disk_buffers.png      \
+  docs/img/read_disk_buffers.diagram  \
+  docs/img/storage.png                \
+  docs/img/write_disk_buffers.png     \
+  docs/img/write_disk_buffers.diagram \
+  docs/img/ip_id_v4.png               \
+  docs/img/ip_id_v6.png               \
+  docs/img/hash_distribution.png      \
+  docs/img/complete_bit_prefixes.png  \
+  docs/img/troubleshooting.dot        \
+  docs/img/troubleshooting.png        \
+  docs/img/troubleshooting_thumb.png  \
+  docs/img/hacking.diagram            \
+  docs/img/hacking.png                \
+  docs/img/utp_stack.diagram          \
+  docs/img/utp_stack.png              \
+  docs/img/bitcoin.png                \
+  docs/img/logo-color-text.png        \
+  docs/style.css
 
 DOCS_PAGES = \
   docs/building.html              \
@@ -98,12 +87,12 @@ DOCS_PAGES = \
   docs/dht_store.html             \
   docs/examples.html              \
   docs/extension_protocol.html    \
-  docs/features.html              \
+  docs/features-ref.html          \
   docs/index.html                 \
   docs/manual-ref.html            \
   docs/projects.html              \
   docs/python_binding.html        \
-  docs/tuning.html                \
+  docs/tuning-ref.html            \
   docs/settings.rst               \
   docs/stats_counters.rst         \
   docs/troubleshooting.html       \
@@ -121,6 +110,7 @@ DOCS_PAGES = \
   docs/extension_protocol.rst     \
   docs/features.rst               \
   docs/index.rst                  \
+  docs/manual.rst                 \
   docs/manual-ref.rst             \
   docs/projects.rst               \
   docs/python_binding.rst         \
@@ -130,23 +120,38 @@ DOCS_PAGES = \
   docs/utp.rst                    \
   docs/streaming.rst              \
   docs/tutorial.rst               \
+  docs/tutorial-ref.rst           \
   docs/header.rst                 \
-  docs/tutorial.html              \
+  docs/hacking.rst                \
+  docs/hacking.html               \
+  docs/todo.html                  \
+  docs/tutorial-ref.html          \
   docs/upgrade_to_1.2-ref.html    \
-  docs/reference-Alerts.html      \
-  docs/reference-Bdecoding.html   \
-  docs/reference-Bencoding.html   \
-  docs/reference-Core.html        \
-  docs/reference-Create_Torrents.html \
-  docs/reference-ed25519.html     \
-  docs/reference-Error_Codes.html \
-  docs/reference-Filter.html      \
-  docs/reference-Plugins.html     \
-  docs/reference-Settings.html    \
-  docs/reference-Storage.html     \
-  docs/reference-Custom_Storage.html \
-  docs/reference-Utility.html     \
+  docs/upgrade_to_2.0-ref.html    \
   docs/reference.html             \
+  docs/reference-Core.html        \
+  docs/reference-DHT.html         \
+  docs/reference-Session.html     \
+  docs/reference-Torrent_Handle.html \
+  docs/reference-Torrent_Info.html \
+  docs/reference-Trackers.html   \
+  docs/reference-PeerClass.html  \
+  docs/reference-Torrent_Status.html \
+  docs/reference-Stats.html      \
+  docs/reference-Resume_Data.html \
+  docs/reference-Add_Torrent.html \
+  docs/reference-Plugins.html    \
+  docs/reference-Create_Torrents.html \
+  docs/reference-Error_Codes.html \
+  docs/reference-Storage.html    \
+  docs/reference-Custom_Storage.html \
+  docs/reference-Utility.html    \
+  docs/reference-Bencoding.html  \
+  docs/reference-Alerts.html     \
+  docs/reference-Filter.html     \
+  docs/reference-Settings.html   \
+  docs/reference-Bdecoding.html  \
+  docs/reference-ed25519.html    \
   docs/single-page-ref.html
 
 ED25519_SOURCE = \
@@ -227,6 +232,7 @@ EXAMPLE_FILES= \
   Jamfile \
   bt-get.cpp \
   bt-get2.cpp \
+  bt-get3.cpp \
   client_test.cpp \
   cmake/FindLibtorrentRasterbar.cmake \
   connection_tester.cpp \
@@ -248,6 +254,8 @@ TOOLS_FILES= \
   CMakeLists.txt         \
   Jamfile                \
   dht_put.cpp            \
+  dht_sample.cpp         \
+  disk_io_stress_test.cpp\
   parse_dht_log.py       \
   parse_dht_rtt.py       \
   parse_dht_stats.py     \
@@ -292,7 +300,6 @@ SOURCES = \
   bdecode.cpp                     \
   bitfield.cpp                    \
   bloom_filter.cpp                \
-  broadcast_socket.cpp            \
   bt_peer_connection.cpp          \
   chained_buffer.cpp              \
   choker.cpp                      \
@@ -303,7 +310,6 @@ SOURCES = \
   disabled_disk_io.cpp            \
   disk_buffer_holder.cpp          \
   disk_buffer_pool.cpp            \
-  disk_interface.cpp              \
   disk_io_job.cpp                 \
   disk_io_thread_pool.cpp         \
   disk_job_fence.cpp              \
@@ -331,13 +337,14 @@ SOURCES = \
   identify_client.cpp             \
   instantiate_connection.cpp      \
   ip_filter.cpp                   \
+  ip_helpers.cpp                  \
   ip_notifier.cpp                 \
   ip_voter.cpp                    \
-  lazy_bdecode.cpp                \
   listen_socket_handle.cpp        \
   lsd.cpp                         \
   magnet_uri.cpp                  \
   merkle.cpp                      \
+  merkle_tree.cpp                 \
   mmap.cpp                        \
   mmap_disk_io.cpp                \
   mmap_storage.cpp                \
@@ -374,7 +381,6 @@ SOURCES = \
   session_params.cpp              \
   session_settings.cpp            \
   session_stats.cpp               \
-  session_udp_sockets.cpp         \
   settings_pack.cpp               \
   sha1.cpp                        \
   sha1_hash.cpp                   \
@@ -383,6 +389,7 @@ SOURCES = \
   socket_io.cpp                   \
   socket_type.cpp                 \
   socks5_stream.cpp               \
+  ssl.cpp                         \
   stack_allocator.cpp             \
   stat.cpp                        \
   stat_cache.cpp                  \
@@ -409,42 +416,33 @@ SOURCES = \
   web_connection_base.cpp         \
   web_peer_connection.cpp         \
   write_resume_data.cpp           \
-  xml_parse.cpp
+  xml_parse.cpp                   \
+  rtc_signaling.cpp               \
+  rtc_stream.cpp                  \
+  websocket_stream.cpp            \
+  websocket_tracker_connection.cpp
 
 HEADERS = \
   ConvertUTF.h                 \
   add_torrent_params.hpp       \
   address.hpp                  \
   alert.hpp                    \
-  alert_manager.hpp            \
   alert_types.hpp              \
   announce_entry.hpp           \
   assert.hpp                   \
-  bandwidth_limit.hpp          \
-  bandwidth_manager.hpp        \
-  bandwidth_queue_entry.hpp    \
-  bandwidth_socket.hpp         \
   bdecode.hpp                  \
   bencode.hpp                  \
   bitfield.hpp                 \
-  bloom_filter.hpp             \
-  broadcast_socket.hpp         \
-  bt_peer_connection.hpp       \
-  choker.hpp                   \
+  client_data.hpp              \
   close_reason.hpp             \
   config.hpp                   \
   copy_ptr.hpp                 \
-  crc32c.hpp                   \
   create_torrent.hpp           \
   deadline_timer.hpp           \
   debug.hpp                    \
   disabled_disk_io.hpp         \
   disk_buffer_holder.hpp       \
-  disk_buffer_pool.hpp         \
   disk_interface.hpp           \
-  disk_io_job.hpp              \
-  disk_io_thread_pool.hpp      \
-  disk_job_pool.hpp            \
   disk_observer.hpp            \
   download_priority.hpp        \
   entry.hpp                    \
@@ -458,25 +456,17 @@ HEADERS = \
   flags.hpp                    \
   fwd.hpp                      \
   gzip.hpp                     \
-  hash_picker.hpp              \
   hasher.hpp                   \
   hex.hpp                      \
-  http_connection.hpp          \
-  http_parser.hpp              \
-  http_seed_connection.hpp     \
   http_stream.hpp              \
   http_tracker_connection.hpp  \
   i2p_stream.hpp               \
   identify_client.hpp          \
   index_range.hpp              \
   info_hash.hpp                \
-  invariant_check.hpp          \
-  io.hpp                       \
   io_context.hpp               \
   io_service.hpp               \
   ip_filter.hpp                \
-  ip_voter.hpp                 \
-  lazy_entry.hpp               \
   link.hpp                     \
   lsd.hpp                      \
   magnet_uri.hpp               \
@@ -498,7 +488,6 @@ HEADERS = \
   peer_connection_interface.hpp \
   peer_id.hpp                  \
   peer_info.hpp                \
-  peer_list.hpp                \
   peer_request.hpp             \
   performance_counters.hpp     \
   pex_flags.hpp                \
@@ -514,8 +503,6 @@ HEADERS = \
   read_resume_data.hpp         \
   request_blocks.hpp           \
   resolve_links.hpp            \
-  resolver.hpp                 \
-  resolver_interface.hpp       \
   session.hpp                  \
   session_handle.hpp           \
   session_params.hpp           \
@@ -533,16 +520,16 @@ HEADERS = \
   socket_type.hpp              \
   socks5_stream.hpp            \
   span.hpp                     \
+  ssl.hpp                      \
   ssl_stream.hpp               \
-  stack_allocator.hpp          \
   stat.hpp                     \
   stat_cache.hpp               \
+  storage.hpp                  \
   storage_defs.hpp             \
   string_util.hpp              \
   string_view.hpp              \
   tailqueue.hpp                \
   time.hpp                     \
-  torrent.hpp                  \
   torrent_flags.hpp            \
   torrent_handle.hpp           \
   torrent_info.hpp             \
@@ -558,30 +545,42 @@ HEADERS = \
   utf8.hpp                     \
   vector_utils.hpp             \
   version.hpp                  \
-  web_connection_base.hpp      \
-  web_peer_connection.hpp      \
   write_resume_data.hpp        \
-  xml_parse.hpp                \
   \
+  aux_/alert_manager.hpp            \
   aux_/aligned_storage.hpp          \
   aux_/aligned_union.hpp            \
   aux_/alloca.hpp                   \
   aux_/allocating_handler.hpp       \
+  aux_/announce_entry.hpp           \
   aux_/array.hpp                    \
+  aux_/bandwidth_limit.hpp          \
+  aux_/bandwidth_manager.hpp        \
+  aux_/bandwidth_queue_entry.hpp    \
+  aux_/bandwidth_socket.hpp         \
   aux_/bind_to_device.hpp           \
   aux_/buffer.hpp                   \
   aux_/byteswap.hpp                 \
+  aux_/bloom_filter.hpp             \
+  aux_/bt_peer_connection.hpp       \
   aux_/container_wrapper.hpp        \
   aux_/chained_buffer.hpp           \
+  aux_/choker.hpp                   \
   aux_/cppint_import_export.hpp     \
   aux_/cpuid.hpp                    \
+  aux_/crc32c.hpp                   \
   aux_/deferred_handler.hpp         \
   aux_/deprecated.hpp               \
   aux_/deque.hpp                    \
   aux_/dev_random.hpp               \
+  aux_/disable_deprecation_warnings_push.hpp \
   aux_/disable_warnings_pop.hpp     \
   aux_/disable_warnings_push.hpp    \
+  aux_/disk_buffer_pool.hpp         \
+  aux_/disk_io_job.hpp              \
+  aux_/disk_io_thread_pool.hpp      \
   aux_/disk_job_fence.hpp           \
+  aux_/disk_job_pool.hpp            \
   aux_/ed25519.hpp                  \
   aux_/escape_string.hpp            \
   aux_/export.hpp                   \
@@ -590,28 +589,40 @@ HEADERS = \
   aux_/file_view_pool.hpp           \
   aux_/generate_peer_id.hpp         \
   aux_/has_block.hpp                \
+  aux_/hash_picker.hpp              \
   aux_/hasher512.hpp                \
   aux_/heterogeneous_queue.hpp      \
+  aux_/http_connection.hpp          \
+  aux_/http_parser.hpp              \
+  aux_/http_seed_connection.hpp     \
   aux_/instantiate_connection.hpp   \
+  aux_/invariant_check.hpp          \
   aux_/io.hpp                       \
+  aux_/io_bytes.hpp                 \
+  aux_/ip_helpers.hpp               \
   aux_/ip_notifier.hpp              \
+  aux_/ip_voter.hpp                 \
+  aux_/keepalive.hpp                \
   aux_/listen_socket_handle.hpp     \
   aux_/lsd.hpp                      \
   aux_/merkle.hpp                   \
+  aux_/merkle_tree.hpp              \
   aux_/mmap.hpp                     \
   aux_/noexcept_movable.hpp         \
   aux_/numeric_cast.hpp             \
   aux_/open_mode.hpp                \
-  aux_/openssl.hpp                  \
   aux_/packet_buffer.hpp            \
   aux_/packet_pool.hpp              \
   aux_/path.hpp                     \
+  aux_/peer_list.hpp                \
   aux_/polymorphic_socket.hpp       \
   aux_/portmap.hpp                  \
   aux_/posix_storage.hpp            \
   aux_/proxy_settings.hpp           \
   aux_/range.hpp                    \
   aux_/receive_buffer.hpp           \
+  aux_/resolver.hpp                 \
+  aux_/resolver_interface.hpp       \
   aux_/route.h                      \
   aux_/scope_end.hpp                \
   aux_/session_call.hpp             \
@@ -622,6 +633,7 @@ HEADERS = \
   aux_/set_socket_buffer.hpp        \
   aux_/sha512.hpp                   \
   aux_/socket_type.hpp              \
+  aux_/stack_allocator.hpp          \
   aux_/storage_utils.hpp            \
   aux_/store_buffer.hpp             \
   aux_/string_ptr.hpp               \
@@ -630,14 +642,22 @@ HEADERS = \
   aux_/throw.hpp                    \
   aux_/time.hpp                     \
   aux_/timestamp_history.hpp        \
+  aux_/torrent.hpp                  \
   aux_/torrent_impl.hpp             \
   aux_/torrent_list.hpp             \
   aux_/unique_ptr.hpp               \
   aux_/utp_socket_manager.hpp       \
   aux_/utp_stream.hpp               \
   aux_/vector.hpp                   \
+  aux_/web_connection_base.hpp      \
+  aux_/web_peer_connection.hpp      \
   aux_/win_crypto_provider.hpp      \
   aux_/win_util.hpp                 \
+  aux_/rtc_signaling.hpp            \
+  aux_/rtc_stream.hpp               \
+  aux_/websocket_stream.hpp         \
+  aux_/websocket_tracker_connection.hpp \
+  aux_/xml_parse.hpp                \
   \
   extensions/smart_ban.hpp          \
   extensions/ut_metadata.hpp        \
@@ -682,6 +702,32 @@ TRY_SIGNAL = \
   README.rst \
   Jamfile \
   CMakeLists.txt
+
+ASIO_GNUTLS = \
+  LICENSE_1_0.txt \
+  Jamfile \
+  include/boost/asio/gnutls.hpp \
+  include/boost/asio/gnutls \
+  include/boost/asio/gnutls/rfc2818_verification.hpp \
+  include/boost/asio/gnutls/stream_base.hpp \
+  include/boost/asio/gnutls/error.hpp \
+  include/boost/asio/gnutls/host_name_verification.hpp \
+  include/boost/asio/gnutls/stream.hpp \
+  include/boost/asio/gnutls/context_base.hpp \
+  include/boost/asio/gnutls/verify_context.hpp \
+  include/boost/asio/gnutls/context.hpp \
+  README.md \
+  test/unit_test.hpp \
+  test/gnutls/context_base.cpp \
+  test/gnutls/stream_base.cpp \
+  test/gnutls/host_name_verification.cpp \
+  test/gnutls/error.cpp \
+  test/gnutls/Jamfile.v2 \
+  test/gnutls/context.cpp \
+  test/gnutls/rfc2818_verification.cpp \
+  test/gnutls/stream.cpp
+
+DATACHANNEL = $(shell cd deps/libdatachannel && git ls-files)
 
 SIM_SOURCES = \
   Jamfile \
@@ -881,6 +927,8 @@ TEST_SOURCES = \
   test_xml.cpp \
   \
   main.cpp \
+  broadcast_socket.cpp \
+  broadcast_socket.hpp \
   test.cpp \
   setup_transfer.cpp \
   dht_server.cpp \
@@ -941,6 +989,7 @@ TEST_TORRENTS = \
   no_creation_date.torrent \
   no_files.torrent \
   no_name.torrent \
+  overlapping_symlinks.torrent \
   pad_file.torrent \
   pad_file_no_path.torrent \
   parent_path.torrent \
@@ -974,6 +1023,7 @@ TEST_TORRENTS = \
   v2_deep_recursion.torrent \
   v2_non_multiple_piece_layer.torrent \
   v2_piece_layer_invalid_file_hash.torrent \
+  v2_invalid_pad_file.torrent \
   v2_invalid_piece_layer.torrent \
   v2_invalid_piece_layer_size.torrent \
   v2_multiple_files.torrent \
@@ -985,7 +1035,9 @@ TEST_TORRENTS = \
   v2_no_piece_layers.torrent \
   v2_large_file.torrent \
   v2_large_offset.torrent \
-  v2_piece_size.torrent
+  v2_piece_size.torrent \
+  v2_zero_root.torrent \
+  v2_zero_root_small.torrent
 
 MUTABLE_TEST_TORRENTS = \
   test1.torrent \
@@ -1019,9 +1071,13 @@ TEST_EXTRA = Jamfile \
   corrupt.gz \
   invalid1.gz \
   utf8_test.txt \
+  utf8_latin1_test.txt \
   web_server.py \
   socks.py \
-  http.py
+  http_proxy.py \
+  root1.xml \
+  root2.xml \
+  root3.xml
 
 dist: FORCE
 	(cd docs; make)
@@ -1038,6 +1094,8 @@ dist: FORCE
     $(addprefix test/,${TEST_EXTRA}) \
     $(addprefix simulation/,${SIM_SOURCES}) \
     $(addprefix deps/try_signal/,${TRY_SIGNAL}) \
+    $(addprefix deps/asio-gnutls/,${ASIO_GNUTLS}) \
+    $(addprefix deps/libdatachannel/,${DATACHANNEL}) \
     $(addprefix simulation/libsimulator/,${LIBSIM_EXTRA}) \
     $(addprefix simulation/libsimulator/test,${LIBSIM_TEST}) \
     $(addprefix simulation/libsimulator/include/simulator/,${LIBSIM_HEADERS}) \

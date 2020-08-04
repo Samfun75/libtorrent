@@ -52,6 +52,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/flags.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/units.hpp"
+#include "libtorrent/fwd.hpp"
 
 namespace libtorrent {
 
@@ -59,10 +60,7 @@ namespace libtorrent {
 	// information about a file in a file_storage
 	struct TORRENT_DEPRECATED_EXPORT file_entry
 	{
-#if defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
 		// hidden
 		file_entry();
 		// hidden
@@ -72,9 +70,7 @@ namespace libtorrent {
 		file_entry(file_entry&&) noexcept = default;
 		file_entry& operator=(file_entry&&) & = default;
 
-#if defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 		// the full path of this file. The paths are unicode strings
 		// encoded in UTF-8.
@@ -120,9 +116,6 @@ namespace libtorrent {
 
 #endif // TORRENT_ABI_VERSION
 
-class file_storage;
-class torrent_info;
-
 namespace aux {
 	struct path_index_tag;
 	using path_index_t = aux::strong_typedef<std::uint32_t, path_index_tag>;
@@ -133,7 +126,7 @@ namespace aux {
 		friend class ::lt::file_storage;
 #if TORRENT_USE_INVARIANT_CHECKS
 		// for torrent_info::invariant_check
-		friend class ::lt::torrent_info;
+//		friend class ::lt::torrent_info;
 #endif
 
 		file_entry();
@@ -151,8 +144,8 @@ namespace aux {
 			not_a_symlink = (1 << 15) - 1,
 		};
 
-		static constexpr aux::path_index_t no_path{(1 << 30) - 1};
-		static constexpr aux::path_index_t path_is_absolute{(1 << 30) - 2};
+		static inline constexpr aux::path_index_t no_path{(1 << 30) - 1};
+		static inline constexpr aux::path_index_t path_is_absolute{(1 << 30) - 2};
 
 		// the offset of this file inside the torrent
 		std::uint64_t offset:48;
@@ -252,10 +245,11 @@ namespace aux {
 		bool is_valid() const { return m_piece_length > 0; }
 
 #if TORRENT_ABI_VERSION == 1
-		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER pad_file = 0_bit;
-		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER attribute_hidden = 1_bit;
-		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER attribute_executable = 2_bit;
-		static constexpr file_flags_t TORRENT_DEPRECATED_MEMBER attribute_symlink = 3_bit;
+		using flags_t = file_flags_t;
+		TORRENT_DEPRECATED static inline constexpr file_flags_t pad_file = 0_bit;
+		TORRENT_DEPRECATED static inline constexpr file_flags_t attribute_hidden = 1_bit;
+		TORRENT_DEPRECATED static inline constexpr file_flags_t attribute_executable = 2_bit;
+		TORRENT_DEPRECATED static inline constexpr file_flags_t attribute_symlink = 3_bit;
 #endif
 
 		// allocates space for ``num_files`` in the internal file list. This can
@@ -303,6 +297,7 @@ namespace aux {
 		//
 		// The overloads that take an `error_code` reference will report failures
 		// via that variable, otherwise `system_error` is thrown.
+#ifndef BOOST_NO_EXCEPTIONS
 		void add_file_borrow(string_view filename
 			, std::string const& path, std::int64_t file_size
 			, file_flags_t file_flags = {}, char const* filehash = nullptr
@@ -312,6 +307,7 @@ namespace aux {
 			, file_flags_t file_flags = {}
 			, std::time_t mtime = 0, string_view symlink_path = string_view()
 			, char const* root_hash = nullptr);
+#endif // BOOST_NO_EXCEPTIONS
 		void add_file_borrow(error_code& ec, string_view filename
 			, std::string const& path, std::int64_t file_size
 			, file_flags_t file_flags = {}, char const* filehash = nullptr
@@ -327,14 +323,8 @@ namespace aux {
 		void rename_file(file_index_t index, std::string const& new_filename);
 
 #if TORRENT_ABI_VERSION == 1
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef _MSC_VER
-#pragma warning(push, 1)
-#pragma warning(disable: 4996)
-#endif
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
+
 		TORRENT_DEPRECATED
 		void add_file_borrow(char const* filename, int filename_len
 			, std::string const& path, std::int64_t file_size
@@ -390,12 +380,7 @@ namespace aux {
 		iterator file_at_offset_deprecated(std::int64_t offset) const;
 		file_entry at_deprecated(int index) const;
 
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 #endif // TORRENT_ABI_VERSION
 
 		// returns a list of file_slice objects representing the portions of
@@ -409,7 +394,7 @@ namespace aux {
 		//
 		// may not exceed the total size of the torrent.
 		std::vector<file_slice> map_block(piece_index_t piece, std::int64_t offset
-			, int size) const;
+			, std::int64_t size) const;
 
 		// returns a peer_request representing the piece index, byte offset
 		// and size the specified file range overlaps. This is the inverse
@@ -491,6 +476,10 @@ namespace aux {
 		//
 		// ``root()`` returns the SHA-256 merkle tree root of the specified file,
 		// in case this is a v2 torrent. Otherwise returns zeros.
+		// ``root_ptr()`` returns a pointer to the SHA-256 merkle tree root hash
+		// for the specified file. The pointer points into storage referred to
+		// when the file was added, it is not owned by this object. Torrents
+		// that are not v2 torrents return nullptr.
 		//
 		// The ``mtime()`` is the modification time is the posix
 		// time when a file was last modified when the torrent
@@ -512,6 +501,7 @@ namespace aux {
 		// index (given the piece size).
 		sha1_hash hash(file_index_t index) const;
 		sha256_hash root(file_index_t index) const;
+		char const* root_ptr(file_index_t const index) const;
 		std::string symlink(file_index_t index) const;
 		std::time_t mtime(file_index_t index) const;
 		std::string file_path(file_index_t index, std::string const& save_path = "") const;
@@ -548,18 +538,18 @@ namespace aux {
 		// the file is a pad file. It's required to contain zeros
 		// at it will not be saved to disk. Its purpose is to make
 		// the following file start on a piece boundary.
-		static constexpr file_flags_t flag_pad_file = 0_bit;
+		static inline constexpr file_flags_t flag_pad_file = 0_bit;
 
 		// this file has the hidden attribute set. This is primarily
 		// a windows attribute
-		static constexpr file_flags_t flag_hidden = 1_bit;
+		static inline constexpr file_flags_t flag_hidden = 1_bit;
 
 		// this file has the executable attribute set.
-		static constexpr file_flags_t flag_executable = 2_bit;
+		static inline constexpr file_flags_t flag_executable = 2_bit;
 
 		// this file is a symbolic link. It should have a link
 		// target string associated with it.
-		static constexpr file_flags_t flag_symlink = 3_bit;
+		static inline constexpr file_flags_t flag_symlink = 3_bit;
 
 		// internal
 		// returns all directories used in the torrent. Files in the torrent are
@@ -626,10 +616,6 @@ namespace aux {
 		TORRENT_DEPRECATED
 		std::int64_t file_offset(aux::file_entry const& fe) const;
 #endif
-
-		// if the backing buffer changed for this storage, this is the pointer
-		// offset to add to any pointers to make them point into the new buffer
-		void rebase_pointers(char const* current_base, char const* new_base);
 
 		// validate any symlinks, to ensure they all point to
 		// other files or directories inside this storage. Any invalid symlinks

@@ -105,7 +105,6 @@ struct fastresume_rejected_alert;
 struct peer_blocked_alert;
 struct dht_announce_alert;
 struct dht_get_peers_alert;
-struct stats_alert;
 struct cache_flushed_alert;
 struct lsd_peer_alert;
 struct trackerid_alert;
@@ -140,11 +139,12 @@ struct session_stats_header_alert;
 struct dht_sample_infohashes_alert;
 struct block_uploaded_alert;
 struct alerts_dropped_alert;
+struct socks5_alert;
 TORRENT_VERSION_NAMESPACE_2_END
 
 // include/libtorrent/announce_entry.hpp
-struct announce_infohash;
 TORRENT_VERSION_NAMESPACE_2
+struct announce_infohash;
 struct announce_endpoint;
 struct announce_entry;
 TORRENT_VERSION_NAMESPACE_2_END
@@ -154,6 +154,9 @@ struct bdecode_node;
 
 // include/libtorrent/bitfield.hpp
 struct bitfield;
+
+// include/libtorrent/client_data.hpp
+struct client_data_t;
 
 // include/libtorrent/create_torrent.hpp
 struct create_torrent;
@@ -166,6 +169,9 @@ struct disk_buffer_holder;
 struct open_file_state;
 struct disk_interface;
 struct storage_holder;
+
+// include/libtorrent/disk_observer.hpp
+struct disk_observer;
 
 // include/libtorrent/entry.hpp
 class entry;
@@ -233,7 +239,7 @@ struct peer_request;
 struct counters;
 
 // include/libtorrent/session.hpp
-class session_proxy;
+struct session_proxy;
 struct session;
 
 // include/libtorrent/session_handle.hpp
@@ -247,10 +253,6 @@ TORRENT_VERSION_NAMESPACE_3_END
 // include/libtorrent/session_stats.hpp
 struct stats_metric;
 
-// include/libtorrent/session_status.hpp
-struct utp_status;
-struct session_status;
-
 // include/libtorrent/settings_pack.hpp
 struct settings_interface;
 struct settings_pack;
@@ -262,7 +264,9 @@ struct torrent_handle;
 
 // include/libtorrent/torrent_info.hpp
 struct web_seed_entry;
+TORRENT_VERSION_NAMESPACE_3
 class torrent_info;
+TORRENT_VERSION_NAMESPACE_3_END
 
 // include/libtorrent/torrent_status.hpp
 TORRENT_VERSION_NAMESPACE_2
@@ -274,6 +278,7 @@ TORRENT_VERSION_NAMESPACE_2_END
 // include/libtorrent/alert_types.hpp
 TORRENT_VERSION_NAMESPACE_2
 struct torrent_added_alert;
+struct stats_alert;
 struct anonymous_mode_alert;
 struct mmap_cache_alert;
 TORRENT_VERSION_NAMESPACE_2_END
@@ -289,12 +294,12 @@ namespace dht {
 struct dht_settings;
 }
 
-// include/libtorrent/lazy_entry.hpp
-struct pascal_string;
-struct lazy_entry;
-
 // include/libtorrent/session_settings.hpp
 struct pe_settings;
+
+// include/libtorrent/session_status.hpp
+struct utp_status;
+struct session_status;
 
 #endif // TORRENT_ABI_VERSION
 

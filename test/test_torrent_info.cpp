@@ -60,9 +60,8 @@ TORRENT_TEST(mutable_torrents)
 	lt::create_torrent t(fs, 0x4000);
 
 	// calculate the hash for all pieces
-	sha1_hash ph;
 	for (auto const i : fs.piece_range())
-		t.set_hash(i, ph);
+		t.set_hash(i, sha1_hash::max());
 
 	t.add_collection("collection1");
 	t.add_collection("collection2");
@@ -70,11 +69,9 @@ TORRENT_TEST(mutable_torrents)
 	t.add_similar_torrent(sha1_hash("abababababababababab"));
 	t.add_similar_torrent(sha1_hash("babababababababababa"));
 
-	std::vector<char> tmp;
-	std::back_insert_iterator<std::vector<char>> out(tmp);
-
 	entry tor = t.generate();
-	bencode(out, tor);
+	std::vector<char> tmp;
+	bencode(std::back_inserter(tmp), tor);
 
 	torrent_info ti(tmp, from_span);
 
@@ -282,9 +279,9 @@ static test_torrent_t const test_torrents[] =
 			TEST_EQUAL(ti->files().file_path(file_index_t{ 0 }), "test64K"_sv);
 			TEST_EQUAL(ti->files().file_size(file_index_t{ 0 }), 65536);
 			TEST_EQUAL(aux::to_hex(ti->files().root(file_index_t{ 0 })), "60aae9c7b428f87e0713e88229e18f0adf12cd7b22a0dd8a92bb2485eb7af242"_sv);
-			TEST_EQUAL(ti->info_hash().has_v1(), true);
-			TEST_EQUAL(ti->info_hash().has_v2(), true);
-			TEST_EQUAL(aux::to_hex(ti->info_hash().v2), "597b180c1a170a585dfc5e85d834d69013ceda174b8f357d5bb1a0ca509faf0a"_sv);
+			TEST_EQUAL(ti->info_hashes().has_v1(), true);
+			TEST_EQUAL(ti->info_hashes().has_v2(), true);
+			TEST_EQUAL(aux::to_hex(ti->info_hashes().v2), "597b180c1a170a585dfc5e85d834d69013ceda174b8f357d5bb1a0ca509faf0a"_sv);
 		}
 	},
 	{ "v2_multipiece_file.torrent", [](torrent_info const* ti) {
@@ -292,9 +289,9 @@ static test_torrent_t const test_torrents[] =
 			TEST_EQUAL(ti->files().file_path(file_index_t{ 0 }), "test1MB"_sv);
 			TEST_EQUAL(ti->files().file_size(file_index_t{ 0 }), 1048576);
 			TEST_EQUAL(aux::to_hex(ti->files().root(file_index_t{ 0 })), "515ea9181744b817744ded9d2e8e9dc6a8450c0b0c52e24b5077f302ffbd9008"_sv);
-			TEST_EQUAL(ti->info_hash().has_v1(), true);
-			TEST_EQUAL(ti->info_hash().has_v2(), true);
-			TEST_EQUAL(aux::to_hex(ti->info_hash().v2), "108ac2c3718ce722e6896edc56c4afa98f1d711ecaace7aad74fca418ebd03de"_sv);
+			TEST_EQUAL(ti->info_hashes().has_v1(), true);
+			TEST_EQUAL(ti->info_hashes().has_v2(), true);
+			TEST_EQUAL(aux::to_hex(ti->info_hashes().v2), "108ac2c3718ce722e6896edc56c4afa98f1d711ecaace7aad74fca418ebd03de"_sv);
 		}
 	},
 	{ "v2_only.torrent", [](torrent_info const* ti) {
@@ -302,9 +299,9 @@ static test_torrent_t const test_torrents[] =
 			TEST_EQUAL(ti->files().file_path(file_index_t{ 0 }), "test1MB"_sv);
 			TEST_EQUAL(ti->files().file_size(file_index_t{ 0 }), 1048576);
 			TEST_EQUAL(aux::to_hex(ti->files().root(file_index_t{ 0 })), "515ea9181744b817744ded9d2e8e9dc6a8450c0b0c52e24b5077f302ffbd9008"_sv);
-			TEST_EQUAL(ti->info_hash().has_v1(), false);
-			TEST_EQUAL(ti->info_hash().has_v2(), true);
-			TEST_EQUAL(aux::to_hex(ti->info_hash().v2), "95e04d0c4bad94ab206efa884666fd89777dbe4f7bd9945af1829037a85c6192"_sv);
+			TEST_EQUAL(ti->info_hashes().has_v1(), false);
+			TEST_EQUAL(ti->info_hashes().has_v2(), true);
+			TEST_EQUAL(aux::to_hex(ti->info_hashes().v2), "95e04d0c4bad94ab206efa884666fd89777dbe4f7bd9945af1829037a85c6192"_sv);
 		}
 	},
 	{ "v2_invalid_filename.torrent", [](torrent_info const* ti) {
@@ -369,6 +366,8 @@ test_failing_torrent_t test_error_torrents[] =
 	{ "v2_large_offset.torrent", errors::too_many_pieces_in_torrent},
 	{ "v2_piece_size.torrent", errors::torrent_missing_piece_length},
 	{ "v2_invalid_pad_file.torrent", errors::torrent_invalid_pad_file},
+	{ "v2_zero_root.torrent", errors::torrent_missing_pieces_root},
+	{ "v2_zero_root_small.torrent", errors::torrent_missing_pieces_root},
 };
 
 } // anonymous namespace
@@ -473,10 +472,8 @@ TORRENT_TEST(set_web_seeds)
 	TEST_CHECK(ti.web_seeds() == seeds);
 }
 
-TORRENT_TEST(sanitize_long_path)
+TORRENT_TEST(sanitize_path_truncate)
 {
-	// test sanitize_append_path_element
-
 	using lt::aux::sanitize_append_path_element;
 
 	std::string path;
@@ -503,6 +500,26 @@ TORRENT_TEST(sanitize_long_path)
 		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
 		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
 		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_.test");
+}
+
+TORRENT_TEST(sanitize_path_truncate_utf)
+{
+	using lt::aux::sanitize_append_path_element;
+
+	std::string path;
+	// msvc doesn't like unicode string literals, so we encode it as UTF-8 explicitly
+	sanitize_append_path_element(path,
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi" "\xE2" "\x80" "\x94" "abcde.jpg");
+	TEST_EQUAL(path,
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi_abcdefghi_"
+		"abcdefghi_abcdefghi_abcdefghi_abcdefghi" "\xE2" "\x80" "\x94" ".jpg");
 }
 
 TORRENT_TEST(sanitize_path_trailing_dots)
@@ -966,7 +983,11 @@ TORRENT_TEST(parse_torrents)
 				, flags & file_storage::flag_symlink ? fs.symlink(idx).c_str() : "");
 		}
 	}
+}
 
+TORRENT_TEST(parse_invalid_torrents)
+{
+	std::string root_dir = parent_path(current_working_directory());
 	for (auto const& e : test_error_torrents)
 	{
 		error_code ec;
@@ -1092,10 +1113,8 @@ void test_resolve_duplicates(aux::vector<file_t, file_index_t> const& test)
 	// isn't supported by v2 torrents, so we can only test this with v1 torrents
 	lt::create_torrent t(fs, 0x4000, create_torrent::v1_only);
 
-	// calculate the hash for all pieces
-	sha1_hash ph;
 	for (auto const i : fs.piece_range())
-		t.set_hash(i, ph);
+		t.set_hash(i, sha1_hash::max());
 
 	std::vector<char> tmp;
 	std::back_insert_iterator<std::vector<char>> out(tmp);
@@ -1108,7 +1127,7 @@ void test_resolve_duplicates(aux::vector<file_t, file_index_t> const& test)
 	{
 		std::string p = ti.files().file_path(i);
 		convert_path_to_posix(p);
-		std::printf("%s == %s\n", p.c_str(), test[i].expected_filename.to_string().c_str());
+		std::printf("%s == %s\n", p.c_str(), std::string(test[i].expected_filename).c_str());
 
 		TEST_EQUAL(p, test[i].expected_filename);
 	}
@@ -1177,12 +1196,6 @@ TORRENT_TEST(copy)
 
 	// copy the torrent_info object
 	std::shared_ptr<torrent_info> b = std::make_shared<torrent_info>(*a);
-
-	// clear out the  buffer for a, just to make sure b doesn't have any
-	// references into it by mistake
-	int s = a->metadata_size();
-	std::memset(a->metadata().get(), 0, std::size_t(s));
-
 	a.reset();
 
 	TEST_EQUAL(b->num_files(), 3);

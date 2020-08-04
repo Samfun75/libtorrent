@@ -50,6 +50,9 @@ namespace boost
 using namespace boost::python;
 using namespace lt;
 
+// defined in torrent_info.cpp
+load_torrent_limits dict_to_limits(dict limits);
+
 namespace
 {
 #if TORRENT_ABI_VERSION == 1
@@ -151,19 +154,23 @@ namespace
 		for (int i = settings_pack::string_type_base;
 			i < settings_pack::max_string_setting_internal; ++i)
 		{
-			ret[name_for_setting(i)] = sett.get_str(i);
+			// deprecated settings are still here, they just have empty names
+			char const* name = name_for_setting(i);
+			if (name[0] != '\0') ret[name] = sett.get_str(i);
 		}
 
 		for (int i = settings_pack::int_type_base;
 			i < settings_pack::max_int_setting_internal; ++i)
 		{
-			ret[name_for_setting(i)] = sett.get_int(i);
+			char const* name = name_for_setting(i);
+			if (name[0] != '\0') ret[name] = sett.get_int(i);
 		}
 
 		for (int i = settings_pack::bool_type_base;
 			i < settings_pack::max_bool_setting_internal; ++i)
 		{
-			ret[name_for_setting(i)] = sett.get_bool(i);
+			char const* name = name_for_setting(i);
+			if (name[0] != '\0') ret[name] = sett.get_bool(i);
 		}
 		return ret;
 	}
@@ -419,6 +426,39 @@ namespace
         s.set_alert_notify(std::bind(&alert_notify, cb));
     }
 
+#ifdef TORRENT_WINDOWS
+    void alert_socket_notify(SOCKET const fd)
+    {
+        std::uint8_t dummy = 0;
+        ::send(fd, reinterpret_cast<char const*>(&dummy), 1, 0);
+    }
+#endif
+
+    void alert_fd_notify(int const fd)
+    {
+        std::uint8_t dummy = 0;
+        while (::write(fd, &dummy, 1) < 0 && errno == EINTR);
+    }
+
+    void set_alert_fd(lt::session& s, std::intptr_t const fd)
+    {
+#ifdef TORRENT_WINDOWS
+        auto const sock = static_cast<SOCKET>(fd);
+        int res;
+        int res_size = sizeof(res);
+        if (sock != INVALID_SOCKET
+            && ::getsockopt(sock, SOL_SOCKET, SO_ERROR,
+                (char *)&res, &res_size) == 0)
+        {
+            s.set_alert_notify(std::bind(&alert_socket_notify, sock));
+        }
+        else
+#endif
+        {
+            s.set_alert_notify(std::bind(&alert_fd_notify, fd));
+        }
+    }
+
     alert const*
     wait_for_alert(lt::session& s, int ms)
     {
@@ -452,7 +492,7 @@ namespace
     list get_torrent_status(lt::session& s, object pred, int const flags)
     {
         std::vector<torrent_status> torrents
-            = s.get_torrent_status(boost::bind(&wrap_pred, pred, _1), status_flags_t(flags));
+            = s.get_torrent_status(std::bind(&wrap_pred, pred, std::placeholders::_1), status_flags_t(flags));
 
         list ret;
         for (std::vector<torrent_status>::iterator i = torrents.begin(); i != torrents.end(); ++i)
@@ -638,14 +678,14 @@ namespace
     }
 #endif
 
-    add_torrent_params read_resume_data_wrapper(bytes const& b)
+    add_torrent_params read_resume_data_wrapper0(bytes const& b)
     {
-        error_code ec;
-        add_torrent_params p = read_resume_data(b.arr, ec);
-#ifndef BOOST_NO_EXCEPTIONS
-        if (ec) throw system_error(ec);
-#endif
-        return p;
+        return read_resume_data(b.arr);
+    }
+
+    add_torrent_params read_resume_data_wrapper1(bytes const& b, dict cfg)
+    {
+        return read_resume_data(b.arr, dict_to_limits(cfg));
     }
 
 	 int find_metric_idx_wrap(char const* name)
@@ -951,6 +991,8 @@ void bind_session()
         .def("dht_put_mutable_item", &dht_put_mutable_item)
         .def("dht_get_peers", allow_threads(&lt::session::dht_get_peers))
         .def("dht_announce", allow_threads(&lt::session::dht_announce))
+        .def("dht_live_nodes", allow_threads(&lt::session::dht_live_nodes))
+        .def("dht_sample_infohashes", allow_threads(&lt::session::dht_sample_infohashes))
 #endif // TORRENT_DISABLE_DHT
         .def("add_torrent", &add_torrent)
         .def("async_add_torrent", &async_add_torrent)
@@ -985,6 +1027,7 @@ void bind_session()
         .def("pop_alerts", &pop_alerts)
         .def("wait_for_alert", &wait_for_alert, return_internal_reference<>())
         .def("set_alert_notify", &set_alert_notify)
+        .def("set_alert_fd", &set_alert_fd)
         .def("add_extension", &add_extension)
 #if TORRENT_ABI_VERSION == 1
 #if TORRENT_USE_I2P
@@ -1038,7 +1081,6 @@ void bind_session()
         .def("max_connections", allow_threads(&lt::session::max_connections))
         .def("num_connections", allow_threads(&lt::session::num_connections))
         .def("set_max_half_open_connections", allow_threads(&lt::session::set_max_half_open_connections))
-        .def("set_severity_level", allow_threads(&lt::session::set_severity_level))
         .def("set_alert_queue_size_limit", allow_threads(&lt::session::set_alert_queue_size_limit))
         .def("set_alert_mask", allow_threads(&lt::session::set_alert_mask))
         .def("set_peer_proxy", allow_threads(&lt::session::set_peer_proxy))
@@ -1067,6 +1109,9 @@ void bind_session()
     s.attr("local_peer_class_id") = session::local_peer_class_id;
 
     s.attr("reopen_map_ports") = lt::session::reopen_map_ports;
+
+    s.attr("delete_files") = lt::session::delete_files;
+    s.attr("delete_partfile") = lt::session::delete_partfile;
     }
 
 #if TORRENT_ABI_VERSION == 1
@@ -1106,7 +1151,8 @@ void bind_session()
     def("high_performance_seed", high_performance_seed_wrapper);
     def("min_memory_usage", min_memory_usage_wrapper);
     def("default_settings", default_settings_wrapper);
-    def("read_resume_data", read_resume_data_wrapper);
+    def("read_resume_data", read_resume_data_wrapper0);
+    def("read_resume_data", read_resume_data_wrapper1);
     def("write_resume_data", write_resume_data);
     def("write_resume_data_buf", write_resume_data_buf_);
 

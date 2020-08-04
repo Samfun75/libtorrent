@@ -36,14 +36,14 @@ POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "libtorrent/http_connection.hpp"
+#include "libtorrent/aux_/http_connection.hpp"
 #include "libtorrent/aux_/escape_string.hpp"
 #include "libtorrent/aux_/instantiate_connection.hpp"
 #include "libtorrent/gzip.hpp"
 #include "libtorrent/parse_url.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/aux_/socket_type.hpp" // for async_shutdown
-#include "libtorrent/resolver_interface.hpp"
+#include "libtorrent/aux_/resolver_interface.hpp"
 #include "libtorrent/settings_pack.hpp"
 #include "libtorrent/aux_/time.hpp"
 #include "libtorrent/random.hpp"
@@ -51,38 +51,33 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/time.hpp"
 #include "libtorrent/io_context.hpp"
 #include "libtorrent/i2p_stream.hpp"
+#include "libtorrent/aux_/ip_helpers.hpp"
+#include "libtorrent/ssl.hpp"
 
 #include <functional>
 #include <string>
 #include <algorithm>
 #include <sstream>
 
-#ifdef TORRENT_USE_OPENSSL
-#include "libtorrent/aux_/disable_warnings_push.hpp"
-#include <boost/asio/ssl/context.hpp>
-#include "libtorrent/aux_/disable_warnings_pop.hpp"
-#endif
-
 using namespace std::placeholders;
 
-namespace libtorrent {
+namespace libtorrent::aux {
 
 http_connection::http_connection(io_context& ios
-	, resolver_interface& resolver
+	, aux::resolver_interface& resolver
 	, http_handler handler
 	, bool bottled
 	, int max_bottled_buffer_size
 	, http_connect_handler ch
 	, http_filter_handler fh
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 	, ssl::context* ssl_ctx
 #endif
 	)
 	: m_ios(ios)
 	, m_next_ep(0)
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 	, m_ssl_ctx(ssl_ctx)
-	, m_own_ssl_context(false)
 #endif
 #if TORRENT_USE_I2P
 	, m_i2p_conn(nullptr)
@@ -92,7 +87,6 @@ http_connection::http_connection(io_context& ios
 	, m_connect_handler(std::move(ch))
 	, m_filter_handler(std::move(fh))
 	, m_timer(ios)
-	, m_read_timeout(seconds(5))
 	, m_completion_timeout(seconds(5))
 	, m_limiter_timer(ios)
 	, m_last_receive(aux::time_now())
@@ -103,28 +97,17 @@ http_connection::http_connection(io_context& ios
 	, m_rate_limit(0)
 	, m_download_quota(0)
 	, m_priority(0)
-	, m_resolve_flags{}
 	, m_port(0)
 	, m_bottled(bottled)
-	, m_called(false)
-	, m_limiter_timer_active(false)
-	, m_ssl(false)
-	, m_abort(false)
-	, m_connecting(false)
 {
 	TORRENT_ASSERT(m_handler);
 }
 
-http_connection::~http_connection()
-{
-#ifdef TORRENT_USE_OPENSSL
-	if (m_own_ssl_context) delete m_ssl_ctx;
-#endif
-}
+http_connection::~http_connection() = default;
 
 void http_connection::get(std::string const& url, time_duration timeout, int prio
 	, aux::proxy_settings const* ps, int handle_redirects, std::string const& user_agent
-	, boost::optional<address> const& bind_addr, resolver_flags const resolve_flags, std::string const& auth_
+	, boost::optional<address> const& bind_addr, aux::resolver_flags const resolve_flags, std::string const& auth_
 #if TORRENT_USE_I2P
 	, i2p_connection* i2p_conn
 #endif
@@ -162,7 +145,7 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 	}
 
 	if (protocol != "http"
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 		&& protocol != "https"
 #endif
 		)
@@ -233,7 +216,7 @@ void http_connection::start(std::string const& hostname, int port
 	, time_duration timeout, int prio, aux::proxy_settings const* ps, bool ssl
 	, int handle_redirects
 	, boost::optional<address> const& bind_addr
-	, resolver_flags const resolve_flags
+	, aux::resolver_flags const resolve_flags
 #if TORRENT_USE_I2P
 	, i2p_connection* i2p_conn
 #endif
@@ -250,9 +233,7 @@ void http_connection::start(std::string const& hostname, int port
 	std::shared_ptr<http_connection> me(shared_from_this());
 
 	m_completion_timeout = timeout;
-	m_read_timeout = seconds(5);
-	if (m_read_timeout < timeout / 5) m_read_timeout = timeout / 5;
-	m_timer.expires_after(std::min(m_read_timeout, m_completion_timeout));
+	m_timer.expires_after(m_completion_timeout);
 	ADD_OUTSTANDING_ASYNC("http_connection::on_timeout");
 	m_timer.async_wait(std::bind(&http_connection::on_timeout
 		, std::weak_ptr<http_connection>(me), _1));
@@ -261,6 +242,10 @@ void http_connection::start(std::string const& hostname, int port
 	m_recvbuffer.clear();
 	m_read_pos = 0;
 	m_priority = prio;
+
+#if TORRENT_USE_SSL
+	TORRENT_ASSERT(!ssl || m_ssl_ctx != nullptr);
+#endif
 
 	if (m_sock && m_sock->is_open() && m_hostname == hostname && m_port == port
 		&& m_ssl == ssl && m_bind_addr == bind_addr)
@@ -291,16 +276,13 @@ void http_connection::start(std::string const& hostname, int port
 			// quadruple the timeout for i2p destinations
 			// because i2p is sloooooow
 			m_completion_timeout *= 4;
-			m_read_timeout *= 4;
 
-#if TORRENT_USE_I2P
 			if (i2p_conn->proxy().type != settings_pack::i2p_proxy)
 			{
 				post(m_ios, std::bind(&http_connection::callback
 					, me, error_code(errors::no_i2p_router), span<char>{}));
 				return;
 			}
-#endif
 
 			i2p_proxy = i2p_conn->proxy();
 			proxy = &i2p_proxy;
@@ -319,25 +301,10 @@ void http_connection::start(std::string const& hostname, int port
 		aux::proxy_settings null_proxy;
 
 		void* userdata = nullptr;
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 		if (m_ssl)
 		{
-			if (m_ssl_ctx == nullptr)
-			{
-				m_ssl_ctx = new (std::nothrow) ssl::context(ssl::context::sslv23_client);
-				if (m_ssl_ctx)
-				{
-					m_own_ssl_context = true;
-					error_code ec;
-					m_ssl_ctx->set_verify_mode(ssl::context::verify_none, ec);
-					if (ec)
-					{
-						post(m_ios, std::bind(&http_connection::callback
-							, me, ec, span<char>{}));
-						return;
-					}
-				}
-			}
+			TORRENT_ASSERT(m_ssl_ctx != nullptr);
 			userdata = m_ssl_ctx;
 		}
 #endif
@@ -397,6 +364,7 @@ void http_connection::start(std::string const& hostname, int port
 		}
 		else
 		{
+			m_resolving_host = true;
 			ADD_OUTSTANDING_ASYNC("http_connection::on_resolve");
 			m_resolver.async_resolve(hostname, m_resolve_flags
 				, std::bind(&http_connection::on_resolve
@@ -419,8 +387,9 @@ void http_connection::on_timeout(std::weak_ptr<http_connection> p
 
 	time_point const now = clock_type::now();
 
-	if (c->m_start_time + c->m_completion_timeout <= now
-		|| c->m_last_receive + c->m_read_timeout <= now)
+	// be forgiving of timeout while we're still resolving the hostname
+	// it may be delayed because we're queued up behind another slow lookup
+	if (c->m_start_time + (c->m_completion_timeout * (int(c->m_resolving_host) + 1)) <= now)
 	{
 		// the connection timed out. If we have more endpoints to try, just
 		// close this connection. The on_connect handler will try the next
@@ -439,19 +408,13 @@ void http_connection::on_timeout(std::weak_ptr<http_connection> p
 			// http_connection object alive. We want to cancel all that.
 			error_code ec;
 			c->m_sock->close(ec);
-			c->callback(boost::asio::error::timed_out);
+			c->callback(lt::errors::timed_out);
 			return;
 		}
 	}
-	else
-	{
-		if (!c->m_sock->is_open()) return;
-	}
 
 	ADD_OUTSTANDING_ASYNC("http_connection::on_timeout");
-	c->m_timer.expires_at(std::min(
-		c->m_last_receive + c->m_read_timeout
-		, c->m_start_time + c->m_completion_timeout));
+	c->m_timer.expires_at(c->m_start_time + c->m_completion_timeout);
 	c->m_timer.async_wait(std::bind(&http_connection::on_timeout, p, _1));
 }
 
@@ -463,12 +426,18 @@ void http_connection::close(bool force)
 	{
 		error_code ec;
 		if (force)
+		{
 			m_sock->close(ec);
+			m_timer.cancel();
+		}
 		else
+		{
 			async_shutdown(*m_sock, shared_from_this());
+		}
 	}
+	else
+		m_timer.cancel();
 
-	m_timer.cancel();
 	m_limiter_timer.cancel();
 
 	m_hostname.clear();
@@ -480,13 +449,13 @@ void http_connection::close(bool force)
 #if TORRENT_USE_I2P
 void http_connection::connect_i2p_tracker(char const* destination)
 {
-	TORRENT_ASSERT(boost::get<i2p_stream>(m_sock.get_ptr()));
-#ifdef TORRENT_USE_OPENSSL
+	TORRENT_ASSERT(std::get_if<i2p_stream>(m_sock.get_ptr()));
+#if TORRENT_USE_SSL
 	TORRENT_ASSERT(m_ssl == false);
 #endif
-	boost::get<i2p_stream>(*m_sock).set_destination(destination);
-	boost::get<i2p_stream>(*m_sock).set_command(i2p_stream::cmd_connect);
-	boost::get<i2p_stream>(*m_sock).set_session_id(m_i2p_conn->session_id());
+	std::get<i2p_stream>(*m_sock).set_destination(destination);
+	std::get<i2p_stream>(*m_sock).set_command(i2p_stream::cmd_connect);
+	std::get<i2p_stream>(*m_sock).set_session_id(m_i2p_conn->session_id());
 	ADD_OUTSTANDING_ASYNC("http_connection::on_connect");
 	TORRENT_ASSERT(!m_connecting);
 	m_connecting = true;
@@ -510,12 +479,16 @@ void http_connection::on_resolve(error_code const& e
 	, std::vector<address> const& addresses)
 {
 	COMPLETE_ASYNC("http_connection::on_resolve");
+	m_resolving_host = false;
 	if (e)
 	{
 		callback(e);
 		return;
 	}
 	TORRENT_ASSERT(!addresses.empty());
+
+	// reset timeout
+	m_start_time = clock_type::now();
 
 	for (auto const& addr : addresses)
 		m_endpoints.emplace_back(addr, m_port);
@@ -533,21 +506,9 @@ void http_connection::on_resolve(error_code const& e
 	// only connect to addresses of the same family
 	if (m_bind_addr)
 	{
-		auto new_end = std::partition(m_endpoints.begin(), m_endpoints.end()
-			, [this] (tcp::endpoint const& ep)
-		{
-			if (is_v4(ep) != m_bind_addr->is_v4())
-				return false;
-			if (is_v4(ep) && m_bind_addr->is_v4())
-				return true;
-			TORRENT_ASSERT(is_v6(ep) && m_bind_addr->is_v6());
-			// don't try to connect to a global address with a local source address
-			// this is mainly needed to prevent attempting to connect to a global
-			// address using a ULA as the source
-			if (!is_local(ep.address()) && is_local(*m_bind_addr))
-				return false;
-			return ep.address().to_v6().scope_id() == m_bind_addr->to_v6().scope_id();
-		});
+		auto const new_end = std::remove_if(m_endpoints.begin(), m_endpoints.end()
+			, [&](tcp::endpoint const& ep) { return aux::is_v4(ep) != m_bind_addr->is_v4(); });
+
 		m_endpoints.erase(new_end, m_endpoints.end());
 		if (m_endpoints.empty())
 		{
@@ -580,17 +541,17 @@ void http_connection::connect()
 		{
 			// we're using a socks proxy and we're resolving
 			// hostnames through it
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 			if (m_ssl)
 			{
-				TORRENT_ASSERT(boost::get<ssl_stream<socks5_stream>>(m_sock.get_ptr()));
-				boost::get<ssl_stream<socks5_stream>>(*m_sock).next_layer().set_dst_name(m_hostname);
+				TORRENT_ASSERT(std::get_if<ssl_stream<socks5_stream>>(m_sock.get_ptr()));
+				std::get<ssl_stream<socks5_stream>>(*m_sock).next_layer().set_dst_name(m_hostname);
 			}
 			else
 #endif
 			{
-				TORRENT_ASSERT(boost::get<socks5_stream>(m_sock.get_ptr()));
-				boost::get<socks5_stream>(*m_sock).set_dst_name(m_hostname);
+				TORRENT_ASSERT(std::get_if<socks5_stream>(m_sock.get_ptr()));
+				std::get<socks5_stream>(*m_sock).set_dst_name(m_hostname);
 			}
 		}
 		else
@@ -776,7 +737,7 @@ void http_connection::on_read(error_code const& e
 		{
 			int code = m_parser.status_code();
 
-			if (is_redirect(code))
+			if (aux::is_redirect(code))
 			{
 				// attempt a redirect
 				std::string const& location = m_parser.header("location");
@@ -794,7 +755,7 @@ void http_connection::on_read(error_code const& e
 //				async_shutdown(m_sock, me);
 				m_sock->close(ec);
 
-				std::string url = resolve_redirect_location(m_url, location);
+				std::string url = aux::resolve_redirect_location(m_url, location);
 				get(url, m_completion_timeout, m_priority, &m_proxy, m_redirects - 1
 					, m_user_agent, m_bind_addr, m_resolve_flags, m_auth
 #if TORRENT_USE_I2P

@@ -1,5 +1,15 @@
+	* use std::string_view instead of boost counterpart
+	* libtorrent now requires C++17 to build
+	* added support for WebTorrent
+
 2.0 release
 
+	* deprecate set_file_hash() in torrent creator, as it's superceded by v2 torrents
+	* deprecate mutable access to info_section in torrent_info
+	* removed deprecated lazy_entry/lazy_bdecode
+	* stats_alert deprecated
+	* remove bittyrant choking algorithm
+	* update userdata in add_torrent_params to be type-safe and add to torrent_handle
 	* add ip_filter to session_params
 	* added support for wolfSSL for SHA-1 hash and HTTPS (no Torrents over SSL)
 	* requires OpenSSL minimum version 1.0.0 with SNI support
@@ -12,14 +22,81 @@
 	* announce_entry expose information per v1 and v2 info-hash announces
 	* torrent_removed_alert, torrent_deleted_alert, torrent_delete_failed_alert: info_hash member is no longer a sha-1 hash, but (deprecated) implicitly convertible to one
 	* undeprecate error_file_metadata for torrent errors related to its metadata
-	* remove support for adding a torrent under a UUID (used for previous RSS
-	* support)
+	* remove support for adding a torrent under a UUID (used for previous RSS support)
 	* remove deprecated feature to add torrents by file:// URL
 	* remove deprecated feature to download .torrent file from URL
 	* requires boost >= 1.66 to build
 	* update networking API to networking TS compatible boost.asio
 	* overhauled disk I/O subsystem to use memory mapped files (where available)
 	* libtorrent now requires C++14 to build
+	* added support for GnuTLS for HTTPS and torrents over SSL
+
+	* don't time out tracker announces as eagerly while resolving hostnames
+	* fix NAT-PMP shutdown issue
+	* improve hostname lookup by merging identical lookups
+	* fix network route enumeration for large routing tables
+	* fixed issue where pop_alerts() could return old, invalid alerts
+	* fix issue when receiving have-all message before the metadata
+	* don't leave lingering part files handles open
+	* disallow calling add_piece() during checking
+	* fix incorrect filename truncation at multi-byte character
+	* always announce listen port 1 when using a proxy
+
+1.2.7 released
+
+	* add set_alert_fd in python binding, to supersede set_alert_notify
+	* fix bug in part files > 2 GiB
+	* add function to clear the peer list for a torrent
+	* fix resume data functions to save/restore more torrent flags
+	* limit number of concurrent HTTP announces
+	* fix queue position for force_rechecking a torrent that is not auto-managed
+	* improve rate-based choker documentation, and minor tweak
+	* undeprecate upnp_ignore_nonrouters (but refering to devices on our subnet)
+	* increase default tracker timeout
+	* retry failed socks5 server connections
+	* allow UPnP lease duration to be changed after device discovery
+	* fix IPv6 address change detection on Windows
+
+1.2.6 released
+
+	* fix peer timeout logic
+	* simplify proxy handling. A proxy now overrides listen_interfaces
+	* fix issues when configured to use a non-default choking algorithm
+	* fix issue in reading resume data
+	* revert NXDOMAIN change from 1.2.4
+	* don't open any listen sockets if listen_interfaces is empty or misconfigured
+	* fix bug in auto disk cache size logic
+	* fix issue with outgoing_interfaces setting, where bind() would be called twice
+	* add build option to disable share-mode
+	* support validation of HTTPS trackers
+	* deprecate strict super seeding mode
+	* make UPnP port-mapping lease duration configurable
+	* deprecate the bittyrant choking algorithm
+	* add build option to disable streaming
+
+1.2.5 release
+
+	* announce port=1 instead of port=0, when there is no listen port
+	* fix LSD over IPv6
+	* support TCP_NOTSENT_LOWAT on Linux
+	* fix correct interface binding of local service discovery multicast
+	* fix issue with knowing which interfaces to announce to trackers and DHT
+	* undeprecate settings_pack::dht_upload_rate_limit
+
+1.2.4 release
+
+	* fix binding TCP and UDP sockets to the same port, when specifying port 0
+	* fix announce_to_all_trackers and announce_to_all_tiers behavior
+	* fix suggest_read_cache setting
+	* back-off tracker hostname looksups resulting in NXDOMAIN
+	* lower SOCKS5 UDP keepalive timeout
+	* fix external IP voting for multi-homed DHT nodes
+	* deprecate broadcast_lsd setting. Just use multicast
+	* deprecate upnp_ignore_nonrouters setting
+	* don't attempt sending event=stopped if event=start never succeeded
+	* make sure &key= stays consistent between different source IPs (as mandated by BEP7)
+	* fix binding sockets to outgoing interface
+	* add new socks5_alert to trouble shoot SOCKS5 proxies
 
 1.2.3 release
 
@@ -954,7 +1031,7 @@
 	* support banning web seeds sending corrupt data
 	* don't let hung outgoing connection attempts block incoming connections
 	* improve SSL torrent support by using SNI and a single SSL listen socket
-	* improved peer exchange performance by sharing incoming connections which advertize listen port 
+	* improved peer exchange performance by sharing incoming connections which advertize listen port
 	* deprecate set_ratio(), and per-peer rate limits
 	* add web seed support for torrents with pad files
 	* introduced a more scalable API for torrent status updates (post_torrent_updates()) and updated client_test to use it
@@ -1603,7 +1680,7 @@ release 0.14
 	* Improved UPnP support by ignoring routers not on the clients subnet.
 
 release 0.13
-	
+
 	* Added scrape support
 	* Added add_extension() to torrent_handle. Can instantiate
 	  extensions for torrents while downloading
@@ -1659,9 +1736,9 @@ release 0.13
 	  	bool torrent_handle::is_piece_filtered(int index) const;
 	  	std::vector<bool> torrent_handle::filtered_pieces() const;
 	  	void torrent_handle::filter_files(std::vector<bool> const& files) const;
-	  
+
 	  instead, use the piece_priority functions.
-	  
+
 	* added support for NAT-PMP
 	* added support for piece priorities. Piece filtering is now set as
 	  a priority
@@ -1703,7 +1780,7 @@ release 0.12
 	* added more client peer-id signatures to be recognized.
 	* added support for HTTP servers that skip the CR before the NL at line breaks.
 	* fixed bug in the HTTP code that only accepted headers case sensitive.
-	* fixed bug where one of the session constructors didn't initialize boost.filesystem. 
+	* fixed bug where one of the session constructors didn't initialize boost.filesystem.
 	* fixed bug when the initial checking of a torrent fails with an exception.
 	* fixed bug in DHT code which would send incorrect announce messages.
 	* fixed bug where the http header parser was case sensitive to the header

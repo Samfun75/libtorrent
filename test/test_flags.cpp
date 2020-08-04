@@ -60,6 +60,12 @@ void test_add_and_get_flags(torrent_flags_t const flags)
 	error_code ec;
 	p.ti = std::make_shared<torrent_info>(file("base.torrent"),
 		std::ref(ec));
+	if (flags & torrent_flags::seed_mode)
+	{
+		std::ofstream file("temp");
+		std::vector<char> temp(425);
+		file.write(temp.data(), std::streamsize(temp.size()));
+	}
 	TEST_CHECK(!ec);
 	p.flags = flags;
 	const torrent_handle h = ses.add_torrent(p);
@@ -118,6 +124,7 @@ TORRENT_TEST(flag_upload_mode)
 	test_unset_after_add(torrent_flags::upload_mode);
 }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 TORRENT_TEST(flag_share_mode)
 {
 	// share-mode
@@ -125,6 +132,7 @@ TORRENT_TEST(flag_share_mode)
 	test_set_after_add(torrent_flags::share_mode);
 	test_unset_after_add(torrent_flags::share_mode);
 }
+#endif
 
 TORRENT_TEST(flag_apply_ip_filter)
 {
@@ -154,6 +162,7 @@ TORRENT_TEST(flag_auto_managed)
 // super seeding mode is automatically turned off if we're not a seed
 // since the posix_disk_io is not threaded, this will happen immediately
 #if TORRENT_HAVE_MMAP
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 TORRENT_TEST(flag_super_seeding)
 {
 	// super-seeding
@@ -161,6 +170,7 @@ TORRENT_TEST(flag_super_seeding)
 	test_unset_after_add(torrent_flags::super_seeding);
 	test_set_after_add(torrent_flags::super_seeding);
 }
+#endif
 #endif
 
 TORRENT_TEST(flag_sequential_download)

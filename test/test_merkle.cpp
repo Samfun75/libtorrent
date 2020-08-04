@@ -116,6 +116,21 @@ TORRENT_TEST(num_nodes)
 	TEST_EQUAL(merkle_num_nodes(16), 31);
 }
 
+TORRENT_TEST(first_leaf)
+{
+	// this is the structure:
+	//             0
+	//      1              2
+	//   3      4       5       6
+	//  7 8    9 10   11 12   13 14
+	// total number of nodes given the number of leaves
+	TEST_EQUAL(merkle_first_leaf(1), 0);
+	TEST_EQUAL(merkle_first_leaf(2), 1);
+	TEST_EQUAL(merkle_first_leaf(4), 3);
+	TEST_EQUAL(merkle_first_leaf(8), 7);
+	TEST_EQUAL(merkle_first_leaf(16), 15);
+}
+
 TORRENT_TEST(get_layer)
 {
 	// this is the structure:
@@ -197,6 +212,20 @@ TORRENT_TEST(merkle_get_first_child)
 	TEST_EQUAL(merkle_get_first_child(14), 29);
 	TEST_EQUAL(merkle_get_first_child(15), 31);
 	TEST_EQUAL(merkle_get_first_child(16), 33);
+}
+
+TORRENT_TEST(merkle_layer_start)
+{
+	TEST_EQUAL(merkle_layer_start(0), 0);
+	TEST_EQUAL(merkle_layer_start(1), 1);
+	TEST_EQUAL(merkle_layer_start(2), 3);
+	TEST_EQUAL(merkle_layer_start(3), 7);
+	TEST_EQUAL(merkle_layer_start(4), 15);
+	TEST_EQUAL(merkle_layer_start(5), 31);
+	TEST_EQUAL(merkle_layer_start(6), 63);
+	TEST_EQUAL(merkle_layer_start(7), 127);
+	TEST_EQUAL(merkle_layer_start(8), 255);
+	TEST_EQUAL(merkle_layer_start(9), 511);
 }
 
 TORRENT_TEST(merkle_to_flat_index)
@@ -342,6 +371,208 @@ TORRENT_TEST(merkle_fill_tree)
 	}
 }
 
+TORRENT_TEST(merkle_fill_partial_tree)
+{
+	// fill whole tree
+	{
+		v tree{o,
+		   o,      o,
+		  o, o,   o, o,
+		a,b,c,d,e,f,g,h};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 ab, cd, ef, gh,
+		a,b,c,d,e,f,g,h}));
+	}
+
+	// fill left side of the tree
+	{
+		v tree{o,
+		   o,      eh,
+		 ab,cd,   o, o,
+		a,b,c,d,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,    eh,
+		 ab, cd, o, o,
+		a,b,c,d,o,o,o,o}));
+	}
+
+	// fill right side of the tree
+	{
+		v tree{o,
+		   ad,     o,
+		 o,  o,   o, o,
+		o,o,o,o,e,f,g,h};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,  ef,gh,
+		o,o,o,o,e,f,g,h}));
+	}
+
+	// fill shallow left of the tree
+	{
+		v tree{
+		       o,
+		   o,      eh,
+		 ab, cd,   o, o,
+		o,o,o,o,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,    eh,
+		 ab, cd,   o, o,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// fill shallow right of the tree
+	{
+		v tree{
+		       o,
+		   ad,     o,
+		 o,  o,   ef,gh,
+		o,o,o,o,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,   ef, gh,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// fill uneven tree
+	{
+		v tree{
+		       o,
+		   ad,     o,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// clear orphans
+	{
+		v tree{
+		       o,
+		   ad,    ah,
+		 o,  o,  ef, gh,
+		a,o,c,o,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,   ef,gh,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// clear orphan sub-tree
+	{
+		v tree{o,
+		   o,     o,
+		 o, o,   o, o,
+		a,b,c,d,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		    v{o,
+		   o,     o,
+		 o, o,   o, o,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// fill sub-tree
+	{
+		v tree{o,
+		   o,     eh,
+		 o, o,   o, o,
+		a,b,c,d,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		    v{ah,
+		   ad,   eh,
+		 ab,cd,   o, o,
+		a,b,c,d,o,o,o,o}));
+	}
+
+	// clear no-siblings left
+	{
+		v tree{
+		       o,
+		   ad,    ah,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,o,h};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// clear no-siblings right
+	{
+		v tree{
+		       o,
+		   ad,    ah,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,g,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 o,  o,  ef, gh,
+		o,o,o,o,o,o,o,o}));
+	}
+
+	// fill gaps
+	{
+		v tree{
+		       o,
+		   ad,    ah,
+		 o,  o,  ef,gh,
+		a,b,c,d,o,o,o,o};
+
+		merkle_fill_partial_tree(tree);
+
+		TEST_CHECK((tree ==
+		     v{ah,
+		   ad,     eh,
+		 ab,cd,   ef,gh,
+		a,b,c,d,o,o,o,o}));
+	}
+}
+
 TORRENT_TEST(merkle_root)
 {
 	// all leaves in the tree
@@ -352,6 +583,26 @@ TORRENT_TEST(merkle_root)
 
 	// very small tree
 	TEST_CHECK(merkle_root(v{a,b}, o) == ab);
+
+	// single hash-tree
+	TEST_CHECK(merkle_root(v{a}) == a);
+}
+
+TORRENT_TEST(merkle_root_scratch)
+{
+	std::vector<sha256_hash> buf;
+
+	// all leaves in the tree
+	TEST_CHECK(merkle_root_scratch(v{a,b,c,d,e,f,g,h}, 8, o, buf) == ah);
+
+	// not power-of-two number of leaves
+	TEST_CHECK(merkle_root_scratch(v{a,b,c,d,e,f}, 8, o, buf) == H(ad, H(ef, H(o, o))));
+
+	// very small tree
+	TEST_CHECK(merkle_root_scratch(v{a,b}, 2, o, buf) == ab);
+
+	// unaligned leaf layer
+	TEST_CHECK(merkle_root_scratch(v{a,b,c}, 8, o, buf) == H(H(ab, H(c, o)), H(H(o,o), H(o,o))));
 }
 
 namespace {
@@ -472,3 +723,358 @@ TORRENT_TEST(merkle_clear_tree)
 	}
 }
 
+TORRENT_TEST(merkle_pad)
+{
+	// if the block layer is the same as the piece layer, the pad is always just
+	// zeroes
+	TEST_CHECK(merkle_pad(1, 1) == sha256_hash{});
+	TEST_CHECK(merkle_pad(2, 2) == sha256_hash{});
+	TEST_CHECK(merkle_pad(4, 4) == sha256_hash{});
+	TEST_CHECK(merkle_pad(8, 8) == sha256_hash{});
+	TEST_CHECK(merkle_pad(16, 16) == sha256_hash{});
+
+	// if the block layer is one step below the piece layer, the pad is always
+	// SHA256(0 .. 0). i.e. two zero hashes hashed.
+
+	auto const pad1 = [] {
+		hasher256 ctx;
+		ctx.update(sha256_hash{});
+		ctx.update(sha256_hash{});
+		return ctx.final();
+	}();
+	TEST_CHECK(merkle_pad(2, 1) == pad1);
+	TEST_CHECK(merkle_pad(4, 2) == pad1);
+	TEST_CHECK(merkle_pad(8, 4) == pad1);
+	TEST_CHECK(merkle_pad(16, 8) == pad1);
+
+	auto const pad2 = [&] {
+		hasher256 ctx;
+		ctx.update(pad1);
+		ctx.update(pad1);
+		return ctx.final();
+	}();
+	TEST_CHECK(merkle_pad(4, 1) == pad2);
+	TEST_CHECK(merkle_pad(8, 2) == pad2);
+	TEST_CHECK(merkle_pad(16, 4) == pad2);
+	TEST_CHECK(merkle_pad(32, 8) == pad2);
+}
+
+TORRENT_TEST(merkle_check_proofs_right_left)
+{
+/*
+	       ah
+	   ad      eh
+	 ab  cd  ef  gh
+	a b c d  e f g h
+*/
+
+	// Prove that c is correct by providing its position in its layer (2) and
+	// all the uncle-hashes up. We then get the root hash back which we can
+	// verify against ah.
+	std::vector<sha256_hash> uncles{d, ab, eh};
+
+	// TODO: use strucutured bindings here in C++17
+	aux::vector<std::pair<sha256_hash, sha256_hash>> proofs;
+	sha256_hash tree_root;
+	std::tie(proofs, tree_root) = merkle_check_proofs(c, uncles, 2);
+
+	TEST_CHECK(tree_root == ah);
+	TEST_CHECK((proofs == std::vector<std::pair<sha256_hash, sha256_hash>>{{c, d}, {ab, cd}, {ad, eh}}));
+}
+
+TORRENT_TEST(merkle_check_proofs_left_right)
+{
+/*
+	       ah
+	   ad      eh
+	 ab  cd  ef  gh
+	a b c d  e f g h
+*/
+
+	// Prove that d is correct by providing its position in its layer (3) and
+	// all the uncle-hashes up. We then get the root hash back which we can
+	// verify against ah.
+	std::vector<sha256_hash> uncles{c, ab, eh};
+
+	// TODO: use strucutured bindings here in C++17
+	aux::vector<std::pair<sha256_hash, sha256_hash>> proofs;
+	sha256_hash tree_root;
+	std::tie(proofs, tree_root) = merkle_check_proofs(d, uncles, 3);
+
+	TEST_CHECK(tree_root == ah);
+	TEST_CHECK((proofs == std::vector<std::pair<sha256_hash, sha256_hash>>{{c, d}, {ab, cd}, {ad, eh}}));
+}
+
+TORRENT_TEST(merkle_check_proofs_far_left)
+{
+/*
+	       ah
+	   ad      eh
+	 ab  cd  ef  gh
+	a b c d  e f g h
+*/
+
+	// Prove that a is correct by providing its position in its layer (0) and
+	// all the uncle-hashes up. We then get the root hash back which we can
+	// verify against ah.
+	std::vector<sha256_hash> uncles{b, cd, eh};
+
+	// TODO: use strucutured bindings here in C++17
+	aux::vector<std::pair<sha256_hash, sha256_hash>> proofs;
+	sha256_hash tree_root;
+	std::tie(proofs, tree_root) = merkle_check_proofs(a, uncles, 0);
+
+	TEST_CHECK(tree_root == ah);
+	TEST_CHECK((proofs == std::vector<std::pair<sha256_hash, sha256_hash>>{{a, b}, {ab, cd}, {ad, eh}}));
+}
+
+TORRENT_TEST(merkle_check_proofs_far_right)
+{
+/*
+	       ah
+	   ad      eh
+	 ab  cd  ef  gh
+	a b c d  e f g h
+*/
+
+	// Prove that h is correct by providing its position in its layer (7) and
+	// all the uncle-hashes up. We then get the root hash back which we can
+	// verify against ah.
+	std::vector<sha256_hash> uncles{g, ef, ad};
+
+	// TODO: use strucutured bindings here in C++17
+	aux::vector<std::pair<sha256_hash, sha256_hash>> proofs;
+	sha256_hash tree_root;
+	std::tie(proofs, tree_root) = merkle_check_proofs(h, uncles, 7);
+
+	TEST_CHECK(tree_root == ah);
+	TEST_CHECK((proofs == std::vector<std::pair<sha256_hash, sha256_hash>>{{g, h}, {ef, gh}, {ad, eh}}));
+}
+
+TORRENT_TEST(merkle_validate_node)
+{
+	TEST_CHECK(merkle_validate_node(a, b, ab));
+	TEST_CHECK(merkle_validate_node(c, d, cd));
+	TEST_CHECK(merkle_validate_node(e, f, ef));
+	TEST_CHECK(merkle_validate_node(g, h, gh));
+
+	TEST_CHECK(merkle_validate_node(ab, cd, ad));
+	TEST_CHECK(merkle_validate_node(ef, gh, eh));
+
+	TEST_CHECK(merkle_validate_node(ad, eh, ah));
+
+	TEST_CHECK(!merkle_validate_node(b, a, ab));
+	TEST_CHECK(!merkle_validate_node(d, c, cd));
+	TEST_CHECK(!merkle_validate_node(f, e, ef));
+	TEST_CHECK(!merkle_validate_node(h, g, gh));
+}
+
+TORRENT_TEST(merkle_validate_copy_full)
+{
+
+	v const src{
+	       ah,
+	   ad,     eh,
+	 ab, cd, ef, gh,
+	a,b,c,d,e,f,g,h};
+
+	v empty_tree(15);
+
+	merkle_validate_copy(src, empty_tree, ah);
+
+	TEST_CHECK(empty_tree == src);
+}
+
+TORRENT_TEST(merkle_validate_copy_partial)
+{
+
+	v const src{
+	       ah,
+	   ad,     eh,
+	 ab, cd, ef, o,
+	a,b,c,o,o,o,o,o};
+
+	v empty_tree(15);
+
+	merkle_validate_copy(src, empty_tree, ah);
+
+	v const expected{
+	       ah,
+	   ad,     eh,
+	 ab, cd,  o, o,
+	a,b,o,o,o,o,o,o};
+
+	TEST_CHECK(empty_tree == expected);
+}
+
+TORRENT_TEST(merkle_validate_copy_invalid_root)
+{
+
+	v const src{
+	       ah,
+	   ad,     eh,
+	 ab, cd, ef, o,
+	a,b,c,o,o,o,o,o};
+
+	v empty_tree(15);
+
+	merkle_validate_copy(src, empty_tree, a);
+
+	v const expected(15);
+
+	TEST_CHECK(empty_tree == expected);
+}
+
+TORRENT_TEST(merkle_validate_copy_root_only)
+{
+
+	v const src{
+	       ah,
+	    o,      o,
+	  o,  o,  o, o,
+	o,o,o,o,o,o,o,o};
+
+	v empty_tree(15);
+
+	merkle_validate_copy(src, empty_tree, ah);
+
+	v const expected{
+	       ah,
+	    o,      o,
+	  o,  o,  o, o,
+	o,o,o,o,o,o,o,o};
+
+	TEST_CHECK(empty_tree == expected);
+}
+
+TORRENT_TEST(merkle_validate_proofs)
+{
+/*
+	       ah
+	   ad      eh
+	 ab  cd  ef  gh
+	a b c d  e f g h
+*/
+	using p = std::vector<std::pair<sha256_hash, sha256_hash>>;
+	TEST_CHECK(merkle_validate_proofs(5, p{{ef, gh},{ad, eh}}));
+	TEST_CHECK(merkle_validate_proofs(6, p{{ef, gh},{ad, eh}}));
+	TEST_CHECK(merkle_validate_proofs(9, p{{c, d}, {ab, cd}, {ad, eh}}));
+	TEST_CHECK(merkle_validate_proofs(7, p{{a, b}, {ab, cd}, {ad, eh}}));
+	TEST_CHECK(merkle_validate_proofs(8, p{{a, b}, {ab, cd}, {ad, eh}}));
+}
+
+TORRENT_TEST(merkle_validate_single_leayer_fail_no_parents)
+{
+	v const src{
+	        o,
+	    o,      o,
+	  o,  o,  o, o,
+	a,b,c,d,e,f,g,h};
+
+	TEST_CHECK(!merkle_validate_single_layer(src));
+}
+
+TORRENT_TEST(merkle_validate_single_layer_missing_parent)
+{
+	v const src{
+	        o,
+	    o,      o,
+	  ab, cd,  o,gh,
+	a,b,c,d,e,f,g,h};
+
+	TEST_CHECK(!merkle_validate_single_layer(src));
+}
+
+TORRENT_TEST(merkle_validate_single_layer_missing_leaf)
+{
+	v const src{
+	        o,
+	    o,      o,
+	  ab, cd, ef,gh,
+	a,b,c,o,e,f,g,h};
+
+	TEST_CHECK(!merkle_validate_single_layer(src));
+}
+
+TORRENT_TEST(merkle_validate_single_layer)
+{
+	v const src{
+	        o,
+	    o,      o,
+	  ab, cd, ef,gh,
+	a,b,c,d,e,f,g,h};
+
+	TEST_CHECK(merkle_validate_single_layer(src));
+}
+
+TORRENT_TEST(is_subtree_known_full)
+{
+	v const src{
+	        ah,
+	    ad,     eh,
+	  ab, cd, ef,gh,
+	a,b,c,d,e,f,g,h};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 1, 8) == std::make_tuple(0, 2, 3));
+}
+
+TORRENT_TEST(is_subtree_known_two_levels)
+{
+	v const src{
+	        ah,
+	    ad,     eh,
+	  o, o, ef,gh,
+	a,b,c,d,e,f,g,h};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 1, 8) == std::make_tuple(0, 4, 1));
+}
+
+TORRENT_TEST(is_subtree_known_unknown)
+{
+	v const src{
+	        ah,
+	    ad,     eh,
+	  o, o, ef,gh,
+	a,b,o,d,e,f,g,h};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 1, 8) == std::make_tuple(0, 2, 3));
+}
+
+TORRENT_TEST(is_subtree_known_padding)
+{
+	// the last leaf is padding, it should be assumed to be correct despite
+	// being zero
+	v const src{
+	        ah,
+	    ad,     eh,
+	  o, o, ef,gh,
+	a,b,o,d,e,f,g,o};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 6, 7) == std::make_tuple(6, 2, 6));
+}
+
+TORRENT_TEST(is_subtree_known_padding_two_levels)
+{
+	// the last leaf is padding, it should be assumed to be correct despite
+	// being zero
+	v const src{
+	        ah,
+	    ad,     eh,
+	  o, o,  o, o,
+	a,b,o,d,e,f,g,o};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 6, 7) == std::make_tuple(4, 4, 2));
+}
+
+TORRENT_TEST(is_subtree_known_more_padding_two_levels)
+{
+	// the last two leafs are padding, they should be assumed to be correct despite
+	// being zero
+	v const src{
+	        ah,
+	    ad,     eh,
+	  o, o,  o, o,
+	a,b,o,d,e,f,o,o};
+
+	TEST_CHECK(merkle_find_known_subtree(src, 5, 6) == std::make_tuple(4, 4, 2));
+}

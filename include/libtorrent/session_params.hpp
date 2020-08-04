@@ -71,12 +71,13 @@ TORRENT_VERSION_NAMESPACE_3
 struct TORRENT_EXPORT session_params
 {
 	// This constructor can be used to start with the default plugins
-	// (ut_metadata, ut_pex and smart_ban). The default values in the
-	// settings is to start the default features like upnp, NAT-PMP,
-	// and dht for example.
+	// (ut_metadata, ut_pex and smart_ban). Pass a settings_pack to set the
+	// initial settings when the session starts.
 	session_params(settings_pack&& sp); // NOLINT
 	session_params(settings_pack const& sp); // NOLINT
 	session_params();
+
+	// hidden
 	~session_params();
 
 	// This constructor helps to configure the set of initial plugins
@@ -92,34 +93,31 @@ struct TORRENT_EXPORT session_params
 	session_params& operator=(session_params const&) &;
 	session_params& operator=(session_params&&) &;
 
+	// The settings to configure the session with
 	settings_pack settings;
 
+	// the plugins to add to the session as it is constructed
 	std::vector<std::shared_ptr<plugin>> extensions;
 
 #if TORRENT_ABI_VERSION <= 2
-#ifdef _MSC_VER
-#pragma warning(push, 1)
-#pragma warning( disable : 4996 ) // warning C4996: X: was declared deprecated
-#endif
-#if defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
+
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
+
 	// this is deprecated. Use the dht_* settings instead.
 	dht::dht_settings dht_settings;
-#if defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 #endif
 
+	// DHT node ID and node addresses to bootstrap the DHT with.
 	dht::dht_state dht_state;
 
+	// function object to construct the storage object for DHT items.
 	dht::dht_storage_constructor_type dht_storage_constructor;
 
+	// function object to create the disk I/O subsystem. Defaults to
+	// default_disk_io_constructor.
 	disk_io_constructor_type disk_io_constructor;
 
 	// this container can be used by extensions/plugins to store settings. It's
@@ -134,9 +132,9 @@ struct TORRENT_EXPORT session_params
 
 TORRENT_VERSION_NAMESPACE_3_END
 
-// These functions serialize and deserialize a ``session_params`` object to and
+// These functions serialize and de-serialize a ``session_params`` object to and
 // from bencoded form. The session_params object is used to initialize a new
-// session using the state from a previous one (or by programatically configure
+// session using the state from a previous one (or by programmatically configure
 // the session up-front).
 // The flags parameter can be used to only save and load certain aspects of the
 // session's state.

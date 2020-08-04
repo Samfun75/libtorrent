@@ -51,7 +51,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #include "libtorrent/session.hpp" // for user_load_function_t
-#include "libtorrent/ip_voter.hpp"
+#include "libtorrent/aux_/ip_voter.hpp"
 #include "libtorrent/entry.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/peer_id.hpp"
@@ -63,26 +63,28 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/session_status.hpp"
 #include "libtorrent/add_torrent_params.hpp"
 #include "libtorrent/stat.hpp"
-#include "libtorrent/bandwidth_manager.hpp"
+#include "libtorrent/aux_/bandwidth_manager.hpp"
 #include "libtorrent/udp_socket.hpp"
 #include "libtorrent/assert.hpp"
-#include "libtorrent/alert_manager.hpp" // for alert_manager
+#include "libtorrent/aux_/alert_manager.hpp" // for alert_manager
 #include "libtorrent/deadline_timer.hpp"
 #include "libtorrent/socket_io.hpp" // for print_address
 #include "libtorrent/address.hpp"
 #include "libtorrent/aux_/utp_socket_manager.hpp"
-#include "libtorrent/bloom_filter.hpp"
+#include "libtorrent/aux_/bloom_filter.hpp"
 #include "libtorrent/peer_class.hpp"
 #include "libtorrent/peer_class_type_filter.hpp"
 #include "libtorrent/kademlia/dht_observer.hpp"
 #include "libtorrent/kademlia/dht_state.hpp"
 #include "libtorrent/kademlia/announce_flags.hpp"
-#include "libtorrent/resolver.hpp"
-#include "libtorrent/invariant_check.hpp"
+#include "libtorrent/aux_/resolver.hpp"
+#include "libtorrent/aux_/invariant_check.hpp"
 #include "libtorrent/extensions.hpp"
 #include "libtorrent/aux_/portmap.hpp"
 #include "libtorrent/aux_/lsd.hpp"
 #include "libtorrent/io_context.hpp"
+#include "libtorrent/flags.hpp"
+#include "libtorrent/span.hpp"
 
 #if TORRENT_ABI_VERSION == 1
 #include "libtorrent/session_settings.hpp"
@@ -110,8 +112,7 @@ TORRENT_VERSION_NAMESPACE_3_END
 
 	struct upnp;
 	struct natpmp;
-	class lsd;
-	struct torrent;
+	struct lsd;
 	struct alert;
 	struct torrent_handle;
 
@@ -126,6 +127,7 @@ namespace aux {
 
 	struct session_impl;
 	struct session_settings;
+	struct torrent;
 
 #ifndef TORRENT_DISABLE_LOGGING
 	struct tracker_logger;
@@ -145,11 +147,7 @@ namespace aux {
 		{ return lhs < rhs.get(); }
 	};
 
-	enum class duplex : std::uint8_t
-	{
-		accept_incoming,
-		only_outgoing
-	};
+	using listen_socket_flags_t = flags::bitfield_flag<std::uint8_t, struct listen_socket_flags_tag>;
 
 	struct listen_port_mapping
 	{
@@ -157,8 +155,24 @@ namespace aux {
 		int port = 0;
 	};
 
-	struct listen_socket_t
+	struct TORRENT_EXTRA_EXPORT listen_socket_t : utp_socket_interface
 	{
+		// we accept incoming connections on this interface
+		static inline constexpr listen_socket_flags_t accept_incoming = 0_bit;
+
+		// this interface was specified to be just the local network. If this flag
+		// is not set, this interface is assumed to have a path to the internet
+		// (i.e. have a gateway configured)
+		static inline constexpr listen_socket_flags_t local_network = 1_bit;
+
+		// this interface was expanded from the user requesting to
+		// listen on an unspecified address (either IPv4 or IPv6)
+		static inline constexpr listen_socket_flags_t was_expanded = 2_bit;
+
+		// there's a proxy configured, and this is the only one interface
+		// representing that one proxy
+		static inline constexpr listen_socket_flags_t proxy = 3_bit;
+
 		listen_socket_t() = default;
 
 		// listen_socket_t should not be copied or moved because
@@ -171,6 +185,19 @@ namespace aux {
 		listen_socket_t& operator=(listen_socket_t const&) = delete;
 		listen_socket_t& operator=(listen_socket_t&&) = delete;
 
+		udp::endpoint get_local_endpoint() override
+		{
+			error_code ec;
+			if (udp_sock) return udp_sock->sock.local_endpoint(ec);
+			return {local_endpoint.address(), local_endpoint.port()};
+		}
+
+		// returns true if this listen socket/interface can reach and be reached
+		// by the given address. This is useful to know whether it should be
+		// annoucned to a tracker (given the tracker's IP) or whether it should
+		// have a SOCKS5 UDP tunnel set up (given the IP of the socks proxy)
+		bool can_route(address const&) const;
+
 		// this may be empty but can be set
 		// to the WAN IP address of a NAT router
 		ip_voter external_address;
@@ -178,13 +205,15 @@ namespace aux {
 		// this is a cached local endpoint for the listen TCP socket
 		tcp::endpoint local_endpoint;
 
+		address netmask;
+
 		// the name of the device the socket is bound to, may be empty
 		// if the socket is not bound to a device
 		std::string device;
 
-		// this is the port that was originally specified to listen on
-		// it may be different from local_endpoint.port() if we could
-		// had to retry binding with a higher port
+		// this is the port that was originally specified to listen on it may be
+		// different from local_endpoint.port() if we had to retry binding with a
+		// higher port
 		int original_port = 0;
 
 		// tcp_external_port and udp_external_port return the port which
@@ -220,7 +249,7 @@ namespace aux {
 		// indicates whether this is an SSL listen socket or not
 		transport ssl = transport::plaintext;
 
-		duplex incoming = duplex::accept_incoming;
+		listen_socket_flags_t flags = accept_incoming;
 
 		// the actual sockets (TCP listen socket and UDP socket)
 		// An entry does not necessarily have a UDP or TCP socket. One of these
@@ -237,10 +266,9 @@ namespace aux {
 		aux::handler_storage<aux::udp_handler_max_size, aux::udp_handler> udp_handler_storage;
 
 		std::shared_ptr<natpmp> natpmp_mapper;
+		std::shared_ptr<upnp> upnp_mapper;
 
-		// the key is an id that is used to identify the
-		// client with the tracker only.
-		std::uint32_t tracker_key = 0;
+		std::shared_ptr<struct lsd> lsd;
 
 		// set to true when we receive an incoming connection from this listen
 		// socket
@@ -250,19 +278,27 @@ namespace aux {
 		struct TORRENT_EXTRA_EXPORT listen_endpoint_t
 		{
 			listen_endpoint_t(address const& adr, int p, std::string dev, transport s
-				, duplex d = duplex::accept_incoming)
-				: addr(adr), port(p), device(std::move(dev)), ssl(s), incoming(d) {}
+				, listen_socket_flags_t f, address const& nmask = address{})
+				: addr(adr), netmask(nmask), port(p), device(std::move(dev)), ssl(s), flags(f) {}
 
 			bool operator==(listen_endpoint_t const& o) const
 			{
-				return addr == o.addr && port == o.port && device == o.device && ssl == o.ssl;
+				return addr == o.addr
+					&& port == o.port
+					&& device == o.device
+					&& ssl == o.ssl
+					&& flags == o.flags;
 			}
 
 			address addr;
+			// if this listen endpoint/interface doesn't have a gateway, we cannot
+			// route outside of our network, this netmask defines the range of our
+			// local network
+			address netmask;
 			int port;
 			std::string device;
 			transport ssl;
-			duplex incoming;
+			listen_socket_flags_t flags;
 		};
 
 		// partitions sockets based on whether they match one of the given endpoints
@@ -274,12 +310,22 @@ namespace aux {
 			std::vector<listen_endpoint_t>& eps
 			, std::vector<std::shared_ptr<aux::listen_socket_t>>& sockets);
 
+		TORRENT_EXTRA_EXPORT void interface_to_endpoints(
+			listen_interface_t const& iface
+			, listen_socket_flags_t flags
+			, span<ip_interface const> const ifs
+			, std::vector<listen_endpoint_t>& eps);
+
 		// expand [::] to all IPv6 interfaces for BEP 45 compliance
 		TORRENT_EXTRA_EXPORT void expand_unspecified_address(
-			std::vector<ip_interface> const& ifs
+			span<ip_interface const> ifs
+			, span<ip_route const> routes
 			, std::vector<listen_endpoint_t>& eps);
 
 		void apply_deprecated_dht_settings(settings_pack& sett, bdecode_node const& s);
+
+		TORRENT_EXTRA_EXPORT void expand_devices(span<ip_interface const>
+			, std::vector<listen_endpoint_t>& eps);
 
 		// this is the link between the main thread and the
 		// thread started to run the main downloader loop
@@ -288,7 +334,6 @@ namespace aux {
 			, dht::dht_observer
 			, aux::portmap_callback
 			, aux::lsd_callback
-			, boost::noncopyable
 			, single_threaded
 			, aux::error_handler_interface
 			, std::enable_shared_from_this<session_impl>
@@ -306,12 +351,15 @@ namespace aux {
 			void wrap(Fun f, Args&&... a);
 
 #if TORRENT_USE_INVARIANT_CHECKS
-			friend class libtorrent::invariant_access;
+			friend struct libtorrent::invariant_access;
 #endif
 			using connection_map = std::set<std::shared_ptr<peer_connection>>;
 
 			session_impl(io_context&, settings_pack const&, disk_io_constructor_type);
 			~session_impl() override;
+
+			session_impl(session_impl const&) = delete;
+			session_impl& operator=(session_impl const&) = delete;
 
 			void start_session();
 
@@ -326,19 +374,19 @@ namespace aux {
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 			using ext_function_t
-				= std::function<std::shared_ptr<torrent_plugin>(torrent_handle const&, void*)>;
+				= std::function<std::shared_ptr<torrent_plugin>(torrent_handle const&, client_data_t)>;
 
 			struct session_plugin_wrapper : plugin
 			{
 				explicit session_plugin_wrapper(ext_function_t f) : m_f(std::move(f)) {}
 
-				std::shared_ptr<torrent_plugin> new_torrent(torrent_handle const& t, void* user) override
+				std::shared_ptr<torrent_plugin> new_torrent(torrent_handle const& t, client_data_t const user) override
 				{ return m_f(t, user); }
 				ext_function_t m_f;
 			};
 
 			void add_extension(std::function<std::shared_ptr<torrent_plugin>(
-				torrent_handle const&, void*)> ext);
+				torrent_handle const&, client_data_t)> ext);
 			void add_ses_extension(std::shared_ptr<plugin> ext);
 #endif
 #if TORRENT_USE_ASSERTS
@@ -428,22 +476,10 @@ namespace aux {
 			void add_dht_node(udp::endpoint const& n) override;
 			void add_dht_router(std::pair<std::string, int> const& node);
 #if TORRENT_ABI_VERSION <= 2
-#ifdef _MSC_VER
-#pragma warning(push, 1)
-#pragma warning( disable : 4996 ) // warning C4996: X: was declared deprecated
-#endif
-#if defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
 			void set_dht_settings(dht::dht_settings const& s);
 			dht::dht_settings get_dht_settings() const;
-#if defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 #endif
 
 			// you must give up ownership of the dht state
@@ -481,8 +517,7 @@ namespace aux {
 			void dht_live_nodes(sha1_hash const& nid);
 			void dht_sample_infohashes(udp::endpoint const& ep, sha1_hash const& target);
 
-			void dht_direct_request(udp::endpoint const& ep, entry& e
-				, void* userdata = nullptr);
+			void dht_direct_request(udp::endpoint const& ep, entry& e, client_data_t userdata);
 
 #if TORRENT_ABI_VERSION == 1
 			TORRENT_DEPRECATED
@@ -508,7 +543,7 @@ namespace aux {
 			// a failure to map a port
 			void on_port_mapping(port_mapping_t mapping, address const& ip, int port
 				, portmap_protocol proto, error_code const& ec
-				, portmap_transport transport) override;
+				, portmap_transport transport, listen_socket_handle const&) override;
 
 			bool is_aborted() const override { return m_abort; }
 			bool is_paused() const { return m_paused; }
@@ -553,7 +588,7 @@ namespace aux {
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 			void add_extensions_to_torrent(
-				std::shared_ptr<torrent> const& torrent_ptr, void* userdata);
+				std::shared_ptr<torrent> const& torrent_ptr, client_data_t userdata);
 #endif
 
 			// the add_torrent_params object must be moved in
@@ -561,8 +596,10 @@ namespace aux {
 
 			// second return value is true if the torrent was added and false if an
 			// existing one was found.
-			std::pair<std::shared_ptr<torrent>, bool>
-			add_torrent_impl(add_torrent_params& p, error_code& ec);
+			std::tuple<std::shared_ptr<torrent>, info_hash_t, bool>
+			add_torrent_impl(add_torrent_params&& p, error_code& ec);
+			std::tuple<std::shared_ptr<torrent>, info_hash_t, bool>
+			add_torrent_impl(add_torrent_params const& p, error_code& ec) = delete;
 			void async_add_torrent(add_torrent_params* params);
 
 			void remove_torrent(torrent_handle const& h, remove_flags_t options) override;
@@ -602,7 +639,7 @@ namespace aux {
 			TORRENT_DEPRECATED int max_uploads() const;
 #endif
 
-			bandwidth_manager* get_bandwidth_manager(int channel) override;
+			aux::bandwidth_manager* get_bandwidth_manager(int channel) override;
 
 			int upload_rate_limit(peer_class_t c) const;
 			int download_rate_limit(peer_class_t c) const;
@@ -622,8 +659,6 @@ namespace aux {
 			// ``num_peers_half_open`` instead.
 			int num_connections() const override { return int(m_connections.size()); }
 
-			int peak_up_rate() const { return m_peak_up_rate; }
-
 			void trigger_unchoke() noexcept override
 			{
 				TORRENT_ASSERT(is_single_thread());
@@ -636,8 +671,10 @@ namespace aux {
 			}
 
 #if TORRENT_ABI_VERSION == 1
+#include "libtorrent/aux_/disable_warnings_push.hpp"
 			session_status status() const;
 			peer_id deprecated_get_peer_id() const;
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 #endif
 
 			std::uint16_t listen_port() const override;
@@ -650,8 +687,6 @@ namespace aux {
 			// used by peer connections, returns a TCP listen port
 			// or zero if no matching listen socket is found
 			int listen_port(transport ssl, address const& local_addr) override;
-
-			std::uint32_t get_tracker_key(address const& iface) const;
 
 			void for_each_listen_socket(std::function<void(aux::listen_socket_handle const&)> f) override
 			{
@@ -669,7 +704,7 @@ namespace aux {
 
 			torrent_handle find_torrent_handle(sha1_hash const& info_hash);
 
-			void announce_lsd(sha1_hash const& ih, int port, bool broadcast = false) override;
+			void announce_lsd(sha1_hash const& ih, int port) override;
 
 #if TORRENT_ABI_VERSION <= 2
 			void save_state(entry* e, save_state_flags_t flags) const;
@@ -699,7 +734,7 @@ namespace aux {
 			void start_ip_notifier();
 			void start_lsd();
 			void start_natpmp();
-			upnp* start_upnp();
+			void start_upnp();
 
 			void stop_ip_notifier();
 			void stop_lsd();
@@ -730,7 +765,8 @@ namespace aux {
 				, udp::endpoint const& node) override;
 
 			bool should_log_portmap(portmap_transport transport) const override;
-			void log_portmap(portmap_transport transport, char const* msg) const override;
+			void log_portmap(portmap_transport transport, char const* msg
+				, listen_socket_handle const&) const override;
 
 			bool should_log_lsd() const override;
 			void log_lsd(char const* msg) const override;
@@ -739,12 +775,10 @@ namespace aux {
 			bool on_dht_request(string_view query
 				, dht::msg const& request, entry& response) override;
 
-			void set_external_address(address const& ip
-				, ip_source_t source_type, address const& source) override;
 			void set_external_address(tcp::endpoint const& local_endpoint
 				, address const& ip
 				, ip_source_t source_type, address const& source) override;
-			external_ip external_address() const override;
+			aux::external_ip external_address() const override;
 
 			// used when posting synchronous function
 			// calls to session_impl and torrent objects
@@ -752,14 +786,13 @@ namespace aux {
 			mutable std::condition_variable cond;
 
 			// implements session_interface
-			bool has_udp_outgoing_sockets() const override;
-			tcp::endpoint bind_outgoing_socket(socket_type& s, address
-				const& remote_address, error_code& ec) const override;
+			tcp::endpoint bind_outgoing_socket(socket_type& s
+				, address const& remote_address, error_code& ec) const override;
 			bool verify_incoming_interface(address const& addr);
 			bool verify_bound_address(address const& addr, bool utp
 				, error_code& ec) override;
 
-			bool has_lsd() const override { return m_lsd.get() != nullptr; }
+			bool has_lsd() const override;
 
 			std::vector<block_info>& block_info_storage() override { return m_block_info_storage; }
 
@@ -787,6 +820,7 @@ namespace aux {
 			void update_ignore_rate_limits_on_local_network();
 #endif
 
+			void update_dht_upload_rate_limit();
 			void update_proxy();
 			void update_i2p_bridge();
 			void update_peer_tos();
@@ -813,11 +847,11 @@ namespace aux {
 
 			void update_socket_buffer_size();
 			void update_dht_announce_interval();
-			void update_anonymous_mode();
 			void update_download_rate();
 			void update_upload_rate();
 			void update_connections_limit();
 			void update_alert_mask();
+			void update_validate_https();
 
 			void trigger_auto_manage() override;
 
@@ -840,13 +874,11 @@ namespace aux {
 
 			void on_lsd_peer(tcp::endpoint const& peer, sha1_hash const& ih) override;
 
-			void start_natpmp(aux::listen_socket_t& s);
+			void start_natpmp(std::shared_ptr<aux::listen_socket_t> const&  s);
+			void start_upnp(std::shared_ptr<aux::listen_socket_t> const& s);
 
 			void set_external_address(std::shared_ptr<listen_socket_t> const& sock, address const& ip
 				, ip_source_t source_type, address const& source);
-
-			void interface_to_endpoints(std::string const& device, int port
-				, transport ssl, duplex incoming, std::vector<listen_endpoint_t>& eps);
 
 			counters m_stats_counters;
 
@@ -862,10 +894,17 @@ namespace aux {
 
 			io_context& m_io_context;
 
-#ifdef TORRENT_USE_OPENSSL
-			// this is a generic SSL context used when talking to
-			// unauthenticated HTTPS servers
+#if TORRENT_USE_SSL
+			// this is a generic SSL context used when talking to HTTPS servers
 			ssl::context m_ssl_ctx;
+#endif
+
+#ifdef TORRENT_SSL_PEERS
+			// this is the SSL context used for SSL listen sockets. It doesn't
+			// verify peers, but it has the servername callback set on it. Once it
+			// knows which torrent a peer is connecting to, it will switch the
+			// socket over to the torrent specific context, which does verify peers
+			ssl::context m_peer_ssl_ctx;
 #endif
 
 			// handles delayed alerts
@@ -987,14 +1026,12 @@ namespace aux {
 			// we might need more than one listen socket
 			std::vector<std::shared_ptr<listen_socket_t>> m_listen_sockets;
 
-			outgoing_sockets m_outgoing_sockets;
-
 #if TORRENT_USE_I2P
 			i2p_connection m_i2p_conn;
 			boost::optional<socket_type> m_i2p_listen_socket;
 #endif
 
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 			ssl::context* ssl_ctx() override { return &m_ssl_ctx; }
 #endif
 #ifdef TORRENT_SSL_PEERS
@@ -1053,8 +1090,9 @@ namespace aux {
 			void sent_syn(bool ipv6) override;
 			void received_synack(bool ipv6) override;
 
+#if TORRENT_ABI_VERSION == 1
 			int m_peak_up_rate = 0;
-			int m_peak_down_rate = 0;
+#endif
 
 			void on_tick(error_code const& e);
 
@@ -1077,7 +1115,8 @@ namespace aux {
 				std::int64_t const ret = total_seconds(aux::time_now()
 					- m_created) + 1;
 				TORRENT_ASSERT(ret >= 0);
-				TORRENT_ASSERT(ret <= (std::numeric_limits<std::uint16_t>::max)());
+				if (ret > (std::numeric_limits<std::uint16_t>::max)())
+					return (std::numeric_limits<std::uint16_t>::max)();
 				return static_cast<std::uint16_t>(ret);
 			}
 			time_point session_start_time() const override
@@ -1151,7 +1190,7 @@ namespace aux {
 					ec = boost::asio::error::bad_descriptor;
 					return;
 				}
-				send_udp_packet_hostname(s->udp_sock, hostname, port, p, ec, flags);
+				send_udp_packet_hostname(sock.get_ptr(), hostname, port, p, ec, flags);
 			}
 
 			void send_udp_packet(std::weak_ptr<utp_socket_interface> sock
@@ -1172,7 +1211,7 @@ namespace aux {
 					ec = boost::asio::error::bad_descriptor;
 					return;
 				}
-				send_udp_packet(s->udp_sock, ep, p, ec, flags);
+				send_udp_packet(sock.get_ptr(), ep, p, ec, flags);
 			}
 
 			void on_udp_writeable(std::weak_ptr<session_udp_socket> s, error_code const& ec);
@@ -1193,9 +1232,6 @@ namespace aux {
 			// this is deducted from the connect speed
 			int m_boost_connections = 0;
 
-			std::shared_ptr<upnp> m_upnp;
-			std::shared_ptr<lsd> m_lsd;
-
 			// mask is a bitmask of which protocols to remap on:
 			enum remap_port_mask_t
 			{
@@ -1211,6 +1247,9 @@ namespace aux {
 
 			// abort may not fail and cannot allocate memory
 			aux::handler_storage<aux::abort_handler_max_size, aux::abort_handler> m_abort_handler_storage;
+
+			// submit_deferred may not fail
+			aux::handler_storage<aux::submit_handler_max_size, aux::submit_handler> m_submit_jobs_handler_storage;
 
 			// torrents are announced on the local network in a
 			// round-robin fashion. All torrents are cycled through
@@ -1331,11 +1370,22 @@ namespace aux {
 				, std::list<address> const& tracker_ips
 				, struct tracker_response const& resp) override;
 			void tracker_request_error(tracker_request const& r
-				, error_code const& ec, const std::string& str
+				, error_code const& ec, operation_t op, const std::string& str
 				, seconds32 retry_interval) override;
 			bool should_log() const override;
 			void debug_log(const char* fmt, ...) const noexcept override TORRENT_FORMAT(2,3);
 			session_interface& m_ses;
+
+#if TORRENT_USE_RTC
+			void generate_rtc_offers(int /*count*/
+				, std::function<void(error_code const&, std::vector<aux::rtc_offer>)> handler) override
+			{
+				handler(boost::asio::error::operation_not_supported, {});
+			}
+			void on_rtc_offer(aux::rtc_offer const&) override {}
+			void on_rtc_answer(aux::rtc_answer const&) override {}
+#endif
+
 		private:
 			// explicitly disallow assignment, to silence msvc warning
 			tracker_logger& operator=(tracker_logger const&);

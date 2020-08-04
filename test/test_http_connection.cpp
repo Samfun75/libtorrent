@@ -40,13 +40,12 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/file.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/socket_io.hpp" // print_endpoint
-#include "libtorrent/http_connection.hpp"
-#include "libtorrent/resolver.hpp"
+#include "libtorrent/aux_/http_connection.hpp"
+#include "libtorrent/aux_/resolver.hpp"
 #include "libtorrent/file.hpp"
 #include "libtorrent/aux_/storage_utils.hpp"
 #include "libtorrent/random.hpp"
 
-#include <fstream>
 #include <iostream>
 #include <boost/optional.hpp>
 
@@ -55,7 +54,7 @@ using namespace lt;
 namespace {
 
 io_context ios;
-resolver res(ios);
+aux::resolver res(ios);
 
 int connect_handler_called = 0;
 int handler_called = 0;
@@ -64,7 +63,7 @@ int http_status = 0;
 error_code g_error_code;
 char data_buffer[4000];
 
-void print_http_header(http_parser const& p)
+void print_http_header(aux::http_parser const& p)
 {
 	std::cout << time_now_string() << " < " << p.status_code() << " " << p.message() << std::endl;
 
@@ -74,7 +73,7 @@ void print_http_header(http_parser const& p)
 	}
 }
 
-void http_connect_handler_test(http_connection& c)
+void http_connect_handler_test(aux::http_connection& c)
 {
 	++connect_handler_called;
 	TEST_CHECK(c.socket().is_open());
@@ -85,8 +84,8 @@ void http_connect_handler_test(http_connection& c)
 //	TEST_CHECK(c.socket().remote_endpoint(ec).address() == make_address("127.0.0.1", ec));
 }
 
-void http_handler_test(error_code const& ec, http_parser const& parser
-	, span<char const> data, http_connection&)
+void http_handler_test(error_code const& ec, aux::http_parser const& parser
+	, span<char const> data, aux::http_connection&)
 {
 	++handler_called;
 	data_size = int(data.size());
@@ -127,9 +126,19 @@ void run_test(std::string const& url, int size, int status, int connected
 		<< " connected: " << connected
 		<< " error: " << (ec?ec->message():"no error") << std::endl;
 
-	std::shared_ptr<http_connection> h = std::make_shared<http_connection>(ios
-		, res, &::http_handler_test, true, 1024*1024, &::http_connect_handler_test);
-	h->get(url, seconds(5), 0, &ps, 5, "test/user-agent", boost::none, resolver_flags{}, auth);
+#if TORRENT_USE_SSL
+	ssl::context ssl_ctx(ssl::context::sslv23_client);
+	ssl_ctx.set_verify_mode(ssl::context::verify_none);
+#endif
+
+	std::shared_ptr<aux::http_connection> h = std::make_shared<aux::http_connection>(ios
+		, res, &::http_handler_test, true, 1024*1024, &::http_connect_handler_test
+		, aux::http_filter_handler()
+#if TORRENT_USE_SSL
+		, &ssl_ctx
+#endif
+		);
+	h->get(url, seconds(5), 0, &ps, 5, "test/user-agent", boost::none, aux::resolver_flags{}, auth);
 	ios.restart();
 	ios.run();
 
@@ -235,13 +244,13 @@ void run_suite(std::string const& protocol
 
 } // anonymous namespace
 
-#ifdef TORRENT_USE_OPENSSL
+#if TORRENT_USE_SSL
 TORRENT_TEST(no_proxy_ssl) { run_suite("https", settings_pack::none); }
 TORRENT_TEST(http_ssl) { run_suite("https", settings_pack::http); }
 TORRENT_TEST(http_pw_ssl) { run_suite("https", settings_pack::http_pw); }
 TORRENT_TEST(socks5_proxy_ssl) { run_suite("https", settings_pack::socks5); }
 TORRENT_TEST(socks5_pw_proxy_ssl) { run_suite("https", settings_pack::socks5_pw); }
-#endif // USE_OPENSSL
+#endif // USE_SSL
 
 TORRENT_TEST(http_proxy) { run_suite("http", settings_pack::http); }
 TORRENT_TEST(http__pwproxy) { run_suite("http", settings_pack::http_pw); }

@@ -643,6 +643,25 @@ TORRENT_TEST(resize)
 	TEST_EQUAL(p->have().num_pieces, 0);
 }
 
+TORRENT_TEST(we_have_all)
+{
+	auto p = setup_picker("0123111", "  ** * ", "1234567", " 1234");
+
+	p->we_have_all();
+
+	TEST_EQUAL(p->want().num_pieces, 7);
+	TEST_EQUAL(p->want().pad_blocks, 0);
+	TEST_EQUAL(p->want().last_piece, true);
+
+	TEST_EQUAL(p->have_want().num_pieces, 7);
+	TEST_EQUAL(p->have_want().pad_blocks, 0);
+	TEST_EQUAL(p->have_want().last_piece, true);
+
+	TEST_EQUAL(p->have().num_pieces, 7);
+	TEST_EQUAL(p->have().pad_blocks, 0);
+	TEST_EQUAL(p->have().last_piece, true);
+}
+
 TORRENT_TEST(dont_pick_requested_blocks)
 {
 	// make sure requested blocks aren't picked
@@ -2466,6 +2485,14 @@ TORRENT_TEST(piece_extent_affinity_no_duplicates)
 		, options | piece_picker::piece_extent_affinity);
 	TEST_CHECK(verify_pick(p, picked));
 	TEST_CHECK(picked == full_piece(9, blocks));
+}
+
+TORRENT_TEST(piece_block_exported)
+{
+	// piece_block is part of the public API via picker_log_alert::blocks
+	// ensure it's exported by using piece_block::invalid
+	TEST_EQUAL(piece_block::invalid.piece_index, std::numeric_limits<piece_index_t>::max());
+	TEST_EQUAL(piece_block::invalid.block_index, std::numeric_limits<int>::max());
 }
 
 //TODO: 2 test picking with partial pieces and other peers present so that both

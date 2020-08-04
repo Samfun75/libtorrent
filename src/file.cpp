@@ -254,7 +254,6 @@ namespace libtorrent {
 			if (err != ERROR_NO_MORE_FILES)
 				ec.assign(err, system_category());
 		}
-		++m_inode;
 #else
 		struct dirent* de;
 		errno = 0;
@@ -276,6 +275,22 @@ namespace libtorrent {
 
 	file::file() : m_file_handle(INVALID_HANDLE_VALUE)
 	{}
+
+	file::file(file&& f) noexcept
+		: m_file_handle(f.m_file_handle)
+		, m_open_mode(f.m_open_mode)
+	{
+		f.m_file_handle = INVALID_HANDLE_VALUE;
+	}
+
+	file& file::operator=(file&& f)
+	{
+		file tmp(std::move(*this)); // close at end of scope
+		m_file_handle = f.m_file_handle;
+		m_open_mode = f.m_open_mode;
+		f.m_file_handle = INVALID_HANDLE_VALUE;
+		return *this;
+	}
 
 	file::file(std::string const& path, aux::open_mode_t const mode, error_code& ec)
 		: m_file_handle(INVALID_HANDLE_VALUE)
@@ -332,7 +347,7 @@ namespace libtorrent {
 
 		handle_type handle = CreateFileW(file_path.c_str(), m.rw_mode
 			, FILE_SHARE_READ | FILE_SHARE_WRITE
-			, 0, m.create_mode, flags, 0);
+			, nullptr, m.create_mode, flags, nullptr);
 
 		if (handle == INVALID_HANDLE_VALUE)
 		{
@@ -349,8 +364,8 @@ namespace libtorrent {
 			&& (mode & aux::open_mode::write))
 		{
 			DWORD temp;
-			::DeviceIoControl(native_handle(), FSCTL_SET_SPARSE, 0, 0
-				, 0, 0, &temp, nullptr);
+			::DeviceIoControl(native_handle(), FSCTL_SET_SPARSE, nullptr, 0
+				, nullptr, 0, &temp, nullptr);
 		}
 #else // TORRENT_WINDOWS
 
@@ -472,7 +487,7 @@ typedef struct _FILE_ALLOCATED_RANGE_BUFFER {
 		FILE_ALLOCATED_RANGE_BUFFER out[2];
 
 		DWORD returned_bytes = 0;
-		BOOL ret = DeviceIoControl(file, FSCTL_QUERY_ALLOCATED_RANGES, (void*)&in, sizeof(in)
+		BOOL ret = DeviceIoControl(file, FSCTL_QUERY_ALLOCATED_RANGES, static_cast<void*>(&in), sizeof(in)
 			, out, sizeof(out), &returned_bytes, nullptr);
 
 		if (ret == FALSE)
@@ -513,7 +528,7 @@ typedef struct _FILE_ALLOCATED_RANGE_BUFFER {
 			FILE_SET_SPARSE_BUFFER b;
 			b.SetSparse = FALSE;
 			::DeviceIoControl(native_handle(), FSCTL_SET_SPARSE, &b, sizeof(b)
-				, 0, 0, &temp, nullptr);
+				, nullptr, 0, &temp, nullptr);
 		}
 
 		CloseHandle(native_handle());
@@ -764,9 +779,8 @@ typedef struct _FILE_ALLOCATED_RANGE_BUFFER {
 			fstore_t f = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, s, 0};
 			if (fcntl(native_handle(), F_PREALLOCATE, &f) < 0)
 			{
-				// It appears Apple's new filesystem (APFS) does not
-				// support this control message and fails with EINVAL
-				// if so, just skip it
+				// MacOS returns EINVAL if the file already has the space
+				// pre-allocated. In which case we can just move on.
 				if (errno != EINVAL)
 				{
 					if (errno != ENOSPC)

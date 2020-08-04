@@ -39,8 +39,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "simulator/socks_server.hpp"
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/aux_/proxy_settings.hpp"
-#include "libtorrent/http_connection.hpp"
-#include "libtorrent/resolver.hpp"
+#include "libtorrent/aux_/http_connection.hpp"
+#include "libtorrent/aux_/resolver.hpp"
 #include "libtorrent/random.hpp"
 
 #include "make_proxy_settings.hpp"
@@ -115,8 +115,8 @@ std::string chunk_string(std::string s)
 	return ret;
 }
 
-std::shared_ptr<http_connection> test_request(io_context& ios
-	, resolver& res
+std::shared_ptr<lt::aux::http_connection> test_request(io_context& ios
+	, lt::aux::resolver& res
 	, std::string const& url
 	, char const* expected_data
 	, int const expected_size
@@ -129,10 +129,15 @@ std::shared_ptr<http_connection> test_request(io_context& ios
 {
 	std::printf(" ===== TESTING: %s =====\n", url.c_str());
 
-	auto h = std::make_shared<http_connection>(ios
+#if TORRENT_USE_SSL
+	ssl::context ssl_ctx(ssl::context::sslv23_client);
+	ssl_ctx.set_verify_mode(ssl::context::verify_none);
+#endif
+
+	auto h = std::make_shared<lt::aux::http_connection>(ios
 		, res
-		, [=](error_code const& ec, http_parser const& parser
-			, span<char const> data, http_connection&)
+		, [=](error_code const& ec, lt::aux::http_parser const& parser
+			, span<char const> data, lt::aux::http_connection&)
 		{
 			std::printf("RESPONSE: %s\n", url.c_str());
 			++*handler_called;
@@ -169,16 +174,21 @@ std::shared_ptr<http_connection> test_request(io_context& ios
 					&& memcmp(expected_data, data.data(), data.size()) == 0);
 			}
 		}
-		, true, 1024*1024
-		, [=](http_connection& c)
+		, true, 1024 * 1024
+		, [=](lt::aux::http_connection& c)
 		{
 			++*connect_handler_called;
 			TEST_CHECK(c.socket().is_open());
 			std::printf("CONNECTED: %s\n", url.c_str());
-		});
+		}
+		, lt::aux::http_filter_handler()
+#if TORRENT_USE_SSL
+		, &ssl_ctx
+#endif
+		);
 
 	h->get(url, seconds(1), 0, &ps, 5, "test/user-agent", boost::none
-		, resolver_flags{}, auth);
+		, lt::aux::resolver_flags{}, auth);
 	return h;
 }
 
@@ -263,7 +273,7 @@ void run_suite(lt::aux::proxy_settings ps)
 	{
 		// this hostname will resolve to multiple IPs, all but one that we cannot
 		// connect to and the second one where we'll get the test file response. Make
-		// sure the http_connection correcly tries the second IP if the first one
+		// sure the http_connection correctly tries the second IP if the first one
 		// fails.
 		run_test(ps, "http://try-next.com:8080/test_file", 1337, 200
 			, error_condition(), { 1, 1, 1});
@@ -301,7 +311,7 @@ void run_test(lt::aux::proxy_settings ps, std::string url, int expect_size, int 
 	sim::asio::io_context web_server(sim, make_address_v4("10.0.0.2"));
 	sim::asio::io_context ios(sim, make_address_v4("10.0.0.1"));
 	sim::asio::io_context proxy_ios(sim, make_address_v4("50.50.50.50"));
-	lt::resolver res(ios);
+	lt::aux::resolver res(ios);
 
 	sim::http_server http(web_server, 8080);
 	sim::socks_server socks(proxy_ios, 4444, ps.type == settings_pack::socks4 ? 4 : 5);
@@ -462,7 +472,7 @@ TORRENT_TEST(http_connection_timeout_server_stalls)
 		make_address_v4("10.0.0.1"),
 		make_address_v6("ff::abad:cafe")
 	});
-	lt::resolver resolver(client_ios);
+	lt::aux::resolver resolver(client_ios);
 
 	const unsigned short http_port = 8080;
 	sim::http_server http(server_ios, http_port);
@@ -477,7 +487,7 @@ TORRENT_TEST(http_connection_timeout_server_stalls)
 	int connect_counter = 0;
 	int handler_counter = 0;
 
-	error_condition timed_out(boost::system::errc::timed_out, boost::system::generic_category());
+	error_condition timed_out(lt::errors::timed_out, lt::libtorrent_category());
 
 	auto c = test_request(client_ios, resolver
 		, "http://dual-stack.test-hostname.com:8080/timeout", data_buffer, -1, -1
@@ -506,7 +516,7 @@ TORRENT_TEST(http_connection_timeout_server_does_not_accept)
 		make_address_v4("10.0.0.1"),
 		make_address_v6("ff::abad:cafe")
 	});
-	lt::resolver resolver(client_ios);
+	lt::aux::resolver resolver(client_ios);
 
 	const unsigned short http_port = 8080;
 
@@ -524,7 +534,7 @@ TORRENT_TEST(http_connection_timeout_server_does_not_accept)
 	int connect_counter = 0;
 	int handler_counter = 0;
 
-	error_condition timed_out(boost::system::errc::timed_out, boost::system::generic_category());
+	error_condition timed_out(lt::errors::timed_out, lt::libtorrent_category());
 
 	char data_buffer[4000];
 	lt::aux::random_bytes(data_buffer);
@@ -547,7 +557,7 @@ void test_proxy_failure(lt::settings_pack::proxy_type_t proxy_type)
 
 	sim::asio::io_context web_server(sim, make_address_v4("10.0.0.2"));
 	sim::asio::io_context ios(sim, make_address_v4("10.0.0.1"));
-	lt::resolver res(ios);
+	lt::aux::resolver res(ios);
 
 	sim::http_server http(web_server, 8080);
 
@@ -599,7 +609,7 @@ TORRENT_TEST(http_connection_ssl_proxy)
 
 	sim::asio::io_context client_ios(sim, make_address_v4("10.0.0.1"));
 	sim::asio::io_context proxy_ios(sim, make_address_v4("50.50.50.50"));
-	lt::resolver res(client_ios);
+	lt::aux::resolver res(client_ios);
 
 	sim::http_server http_proxy(proxy_ios, 4445);
 
@@ -616,14 +626,25 @@ TORRENT_TEST(http_connection_ssl_proxy)
 			return sim::send_response(403, "Not supported", 1337);
 		});
 
-	auto h = std::make_shared<http_connection>(client_ios
+#if TORRENT_USE_SSL
+	lt::ssl::context ssl_ctx(ssl::context::sslv23_client);
+	ssl_ctx.set_verify_mode(ssl::context::verify_none);
+#endif
+
+	auto h = std::make_shared<lt::aux::http_connection>(client_ios
 		, res
-		, [&client_counter](error_code const& ec, http_parser const&
-		, span<char const>, http_connection&)
+		, [&client_counter](error_code const& ec, lt::aux::http_parser const&
+			, span<char const>, lt::aux::http_connection&)
 		{
 			client_counter++;
 			TEST_EQUAL(ec, boost::asio::error::operation_not_supported);
-		});
+		}
+		, true, 1024 * 1024, lt::aux::http_connect_handler()
+		, lt::aux::http_filter_handler()
+#if TORRENT_USE_SSL
+		, &ssl_ctx
+#endif
+		);
 
 	h->start("10.0.0.2", 8080, seconds(1), 0, &ps, true /*ssl*/);
 

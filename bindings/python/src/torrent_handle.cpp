@@ -5,6 +5,7 @@
 #include "boost_python.hpp"
 #include <boost/python/tuple.hpp>
 #include <boost/python/stl_iterator.hpp>
+#include "bytes.hpp"
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/torrent_status.hpp>
@@ -86,7 +87,7 @@ namespace
 
 } // namespace unnamed
 
-list file_progress(torrent_handle& handle, int flags)
+list file_progress(torrent_handle& handle, file_progress_flags_t const flags)
 {
     std::vector<std::int64_t> p;
 
@@ -416,10 +417,16 @@ std::shared_ptr<const torrent_info> get_torrent_info(torrent_handle const& h)
 
 #endif // TORRENT_ABI_VERSION
 
-void add_piece(torrent_handle& th, piece_index_t piece, char const *data
+void add_piece_str(torrent_handle& th, piece_index_t piece, char const *data
     , add_piece_flags_t const flags)
 {
-   th.add_piece(piece, data, flags);
+    th.add_piece(piece, data, flags);
+}
+
+void add_piece_bytes(torrent_handle& th, piece_index_t piece, bytes data
+    , add_piece_flags_t const flags)
+{
+    th.add_piece(piece, data.arr.c_str(), flags);
 }
 
 class dummy5 {};
@@ -429,6 +436,7 @@ class dummy6 {};
 class dummy7 {};
 class dummy8 {};
 class dummy15 {};
+class dummy16 {};
 
 using by_value = return_value_policy<return_by_value>;
 void bind_torrent_handle()
@@ -481,7 +489,7 @@ void bind_torrent_handle()
         .def("get_peer_info", get_peer_info)
         .def("status", _(&torrent_handle::status), arg("flags") = 0xffffffff)
         .def("get_download_queue", get_download_queue)
-        .def("file_progress", file_progress, arg("flags") = 0)
+        .def("file_progress", file_progress, arg("flags") = file_progress_flags_t{})
         .def("trackers", trackers)
         .def("replace_trackers", replace_trackers)
         .def("add_tracker", add_tracker)
@@ -503,7 +511,8 @@ void bind_torrent_handle()
         .def("queue_position_top", _(&torrent_handle::queue_position_top))
         .def("queue_position_bottom", _(&torrent_handle::queue_position_bottom))
 
-        .def("add_piece", add_piece)
+        .def("add_piece", add_piece_str)
+        .def("add_piece", add_piece_bytes)
         .def("read_piece", _(&torrent_handle::read_piece))
         .def("have_piece", _(&torrent_handle::have_piece))
         .def("set_piece_deadline", _(&torrent_handle::set_piece_deadline)
@@ -540,6 +549,7 @@ void bind_torrent_handle()
         .def("max_connections", _(&torrent_handle::max_connections))
         .def("move_storage", _(move_storage0), (arg("path"), arg("flags") = move_flags_t::always_replace_files))
         .def("info_hash", _(&torrent_handle::info_hash))
+        .def("info_hashes", _(&torrent_handle::info_hashes))
         .def("force_recheck", _(&torrent_handle::force_recheck))
         .def("rename_file", _(rename_file0))
         .def("set_ssl_certificate", &torrent_handle::set_ssl_certificate, (arg("cert"), arg("private_key"), arg("dh_params"), arg("passphrase")=""))
@@ -581,7 +591,7 @@ void bind_torrent_handle()
 
     s.attr("ignore_min_interval") = torrent_handle::ignore_min_interval;
     s.attr("overwrite_existing") = torrent_handle::overwrite_existing;
-    s.attr("piece_granularity") = int(torrent_handle::piece_granularity);
+    s.attr("piece_granularity") = torrent_handle::piece_granularity;
     s.attr("graceful_pause") = torrent_handle::graceful_pause;
     s.attr("flush_disk_cache") = torrent_handle::flush_disk_cache;
     s.attr("save_info_dict") = torrent_handle::save_info_dict;
@@ -614,9 +624,10 @@ void bind_torrent_handle()
 #endif
     }
 
-    enum_<torrent_handle::file_progress_flags_t>("file_progress_flags")
-        .value("piece_granularity", torrent_handle::piece_granularity)
-    ;
+    {
+    scope s = class_<dummy16>("file_progress_flags_t");
+    s.attr("piece_granularity") = torrent_handle::piece_granularity;
+    }
 
     {
     scope s = class_<dummy6>("add_piece_flags_t");

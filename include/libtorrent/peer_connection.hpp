@@ -44,12 +44,12 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/alert.hpp"
 #include "libtorrent/peer_request.hpp"
 #include "libtorrent/piece_block_progress.hpp"
-#include "libtorrent/bandwidth_limit.hpp"
+#include "libtorrent/aux_/bandwidth_limit.hpp"
 #include "libtorrent/assert.hpp"
 #include "libtorrent/aux_/chained_buffer.hpp"
 #include "libtorrent/disk_buffer_holder.hpp"
 #include "libtorrent/bitfield.hpp"
-#include "libtorrent/bandwidth_socket.hpp"
+#include "libtorrent/aux_/bandwidth_socket.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/sliding_average.hpp"
 #include "libtorrent/peer_class.hpp"
@@ -83,7 +83,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 namespace libtorrent {
 
-	struct torrent;
 	struct torrent_peer;
 	struct disk_interface;
 
@@ -94,6 +93,7 @@ namespace libtorrent {
 namespace aux {
 
 	struct session_interface;
+	struct torrent;
 
 	struct min_value_t {};
 	static const min_value_t min_value{};
@@ -175,7 +175,7 @@ namespace aux {
 		counters* stats_counters;
 		disk_interface* disk_thread;
 		io_context* ios;
-		std::weak_ptr<torrent> tor;
+		std::weak_ptr<aux::torrent> tor;
 		aux::socket_type s;
 		tcp::endpoint endp;
 		torrent_peer* peerinfo;
@@ -186,7 +186,7 @@ namespace aux {
 	{
 		// if tor is set, this is an outgoing connection
 		peer_connection_hot_members(
-			std::weak_ptr<torrent> t
+			std::weak_ptr<aux::torrent> t
 			, aux::session_interface& ses
 			, aux::session_settings const& sett)
 			: m_torrent(std::move(t))
@@ -219,7 +219,7 @@ namespace aux {
 		// the first cache line) and make the constructor
 		// take a raw pointer. torrent objects should always
 		// outlive their peers
-		std::weak_ptr<torrent> m_torrent;
+		std::weak_ptr<aux::torrent> m_torrent;
 
 	public:
 
@@ -280,14 +280,14 @@ namespace aux {
 
 	struct TORRENT_EXTRA_EXPORT peer_connection
 		: peer_connection_hot_members
-		, bandwidth_socket
+		, aux::bandwidth_socket
 		, peer_class_set
 		, disk_observer
 		, peer_connection_interface
 		, std::enable_shared_from_this<peer_connection>
 	{
-	friend class invariant_access;
-	friend struct torrent;
+	friend struct invariant_access;
+	friend struct aux::torrent;
 	friend struct cork;
 
 		// explicitly disallow assignment, to silence msvc warning
@@ -402,6 +402,7 @@ namespace aux {
 		// it will let the peer know that we have the given piece
 		void announce_piece(piece_index_t index);
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		// this will tell the peer to announce the given piece
 		// and only allow it to request that piece
 		void superseed_piece(piece_index_t replace_piece, piece_index_t new_piece);
@@ -410,6 +411,7 @@ namespace aux {
 			return m_superseed_piece[0] == index
 				|| m_superseed_piece[1] == index;
 		}
+#endif
 
 		// tells if this connection has data it want to send
 		// and has enough upload bandwidth quota left to send it.
@@ -419,8 +421,10 @@ namespace aux {
 		bool is_seed() const;
 		int num_have_pieces() const { return m_num_pieces; }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		void set_share_mode(bool);
 		bool share_mode() const { return m_share_mode; }
+#endif
 
 		void set_upload_only(bool);
 		bool upload_only() const { return m_upload_only; }
@@ -464,7 +468,7 @@ namespace aux {
 		// may be zero if the connection is an incoming connection
 		// and it hasn't received enough information to determine
 		// which torrent it should be associated with
-		std::weak_ptr<torrent> associated_torrent() const
+		std::weak_ptr<aux::torrent> associated_torrent() const
 		{ return m_torrent; }
 
 		// get the info hash associated with this peer
@@ -554,10 +558,6 @@ namespace aux {
 		// returns true if the connection was disconnected
 		bool disconnect_if_redundant();
 
-		void increase_est_reciprocation_rate();
-		void decrease_est_reciprocation_rate();
-		int est_reciprocation_rate() const { return m_est_reciprocation_rate; }
-
 #ifndef TORRENT_DISABLE_LOGGING
 		bool should_log(peer_log_alert::direction_t direction) const final;
 		void peer_log(peer_log_alert::direction_t direction
@@ -620,8 +620,8 @@ namespace aux {
 		// if the block was already time-critical, it returns false.
 		bool make_time_critical(piece_block const& block);
 
-		static constexpr request_flags_t time_critical = 0_bit;
-		static constexpr request_flags_t busy = 1_bit;
+		static inline constexpr request_flags_t time_critical = 0_bit;
+		static inline constexpr request_flags_t busy = 1_bit;
 
 		// adds a block to the request queue
 		// returns true if successful, false otherwise
@@ -792,7 +792,7 @@ namespace aux {
 		void on_disk_read_complete(disk_buffer_holder buffer
 			, storage_error const& error, peer_request const&, time_point issue_time);
 		void on_disk_write_complete(storage_error const& error
-			, peer_request const&, std::shared_ptr<torrent>);
+			, peer_request const&, std::shared_ptr<aux::torrent>);
 		void on_seed_mode_hashed(piece_index_t piece
 			, sha1_hash const& piece_hash, aux::vector<sha256_hash> const& block_hashes
 			, storage_error const& error);
@@ -1059,12 +1059,14 @@ namespace aux {
 		// by sending choke, unchoke.
 		std::uint16_t m_num_invalid_requests = 0;
 
+#ifndef TORRENT_DISABLE_SUPERSEEDING
 		// if [0] is -1, super-seeding is not active. If it is >= 0
 		// this is the piece that is available to this peer. Only
 		// these two pieces can be downloaded from us by this peer.
 		// This will remain the current piece for this peer until
 		// another peer sends us a have message for this piece
 		std::array<piece_index_t, 2> m_superseed_piece = {{piece_index_t(-1), piece_index_t(-1)}};
+#endif
 
 		// the number of bytes send to the disk-io
 		// thread that hasn't yet been completely written.
@@ -1073,12 +1075,6 @@ namespace aux {
 		// max transfer rates seen on this peer
 		int m_download_rate_peak = 0;
 		int m_upload_rate_peak = 0;
-
-		// when using the BitTyrant choker, this is our
-		// estimated reciprocation rate. i.e. the rate
-		// we need to send to this peer for it to unchoke
-		// us
-		int m_est_reciprocation_rate;
 
 		// stop sending data after this many bytes, INT_MAX = inf
 		int m_send_barrier = INT_MAX;
@@ -1142,8 +1138,10 @@ namespace aux {
 		// at a time.
 		bool m_request_large_blocks:1;
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 		// set to true if this peer is in share mode
 		bool m_share_mode:1;
+#endif
 
 		// set to true when this peer is only uploading
 		bool m_upload_only:1;

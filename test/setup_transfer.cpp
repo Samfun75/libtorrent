@@ -42,7 +42,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/session.hpp"
 #include "libtorrent/hasher.hpp"
-#include "libtorrent/http_parser.hpp"
+#include "libtorrent/aux_/http_parser.hpp"
 #include "libtorrent/assert.hpp"
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/create_torrent.hpp"
@@ -51,13 +51,13 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/session_stats.hpp"
 #include "libtorrent/random.hpp"
 #include "libtorrent/torrent_info.hpp"
-#include "libtorrent/broadcast_socket.hpp" // for supports_ipv6()
 #include "libtorrent/hex.hpp" // to_hex
 #include "libtorrent/aux_/vector.hpp"
 #include "libtorrent/aux_/path.hpp"
 #include "libtorrent/aux_/merkle.hpp"
 #include "libtorrent/disk_interface.hpp" // for default_block_size
 #include "libtorrent/file.hpp"
+#include "libtorrent/aux_/ip_helpers.hpp"
 
 #include "test.hpp"
 #include "test_utils.hpp"
@@ -134,7 +134,7 @@ address rand_v4()
 	{
 		g_addr += 0x3080ca;
 		ret = address_v4(g_addr);
-	} while (is_any(ret) || is_local(ret) || is_loopback(ret));
+	} while (ret.is_unspecified() || aux::is_local(ret) || ret.is_loopback());
 	return ret;
 }
 
@@ -173,6 +173,28 @@ udp::endpoint rand_udp_ep(lt::address(&rand_addr)())
 {
 	g_port = (g_port + 1) % 14037;
 	return udp::endpoint(rand_addr(), g_port + 1024);
+}
+
+bool supports_ipv6()
+{
+#if defined TORRENT_BUILD_SIMULATOR
+	return true;
+#elif defined TORRENT_WINDOWS
+	TORRENT_TRY {
+		error_code ec;
+		make_address("::1", ec);
+		return !ec;
+	} TORRENT_CATCH(std::exception const&) { return false; }
+#else
+	io_context ios;
+	tcp::socket test(ios);
+	error_code ec;
+	test.open(tcp::v6(), ec);
+	if (ec) return false;
+	error_code ignore;
+	test.bind(tcp::endpoint(make_address_v6("::1", ignore), 0), ec);
+	return !bool(ec);
+#endif
 }
 
 std::map<std::string, std::int64_t> get_counters(lt::session& s)
@@ -335,7 +357,8 @@ bool print_alerts(lt::session& ses, char const* name
 	{
 		if (peer_disconnected_alert const* p = alert_cast<peer_disconnected_alert>(a))
 		{
-			std::printf("%s: %s: [%s] (%s): %s\n", time_now_string(), name, a->what()
+			std::printf("%s: %s: [%s] (%s): %s\n", time_to_string(a->timestamp())
+				, name, a->what()
 				, print_endpoint(p->endpoint).c_str(), p->message().c_str());
 		}
 		else if (a->type() == invalid_request_alert::alert_type)
@@ -620,7 +643,7 @@ std::string get_python()
 		if (sz == buf.size() - 1) return buf.data();
 	}
 #endif
-	return "python";
+	return "python3";
 }
 
 }
@@ -673,12 +696,12 @@ int start_proxy(int proxy_type)
 			break;
 		case settings_pack::http:
 			type = "http";
-			cmd = "../http.py";
+			cmd = "../http_proxy.py";
 			break;
 		case settings_pack::http_pw:
 			type = "http";
-			auth = " --username testuser --password testpass";
-			cmd = "../http.py";
+			auth = " --basic-auth testuser:testpass";
+			cmd = "../http_proxy.py";
 			break;
 	}
 	std::string python_exe = get_python();
@@ -747,8 +770,12 @@ std::shared_ptr<lt::torrent_info> make_torrent(span<const int> const file_sizes
 {
 	using namespace lt;
 	file_storage fs = make_file_storage(file_sizes, piece_size);
+	return make_torrent(fs);
+}
 
-	lt::create_torrent ct(fs, piece_size);
+std::shared_ptr<lt::torrent_info> make_torrent(lt::file_storage& fs)
+{
+	lt::create_torrent ct(fs, fs.piece_length());
 
 	for (auto const i : fs.piece_range())
 	{
@@ -850,7 +877,7 @@ std::shared_ptr<torrent_info> create_torrent(std::ostream* file
 	}
 
 	aux::vector<char> piece(static_cast<std::size_t>(piece_size));
-	for (int i = 0; i < int(piece.size()); ++i)
+	for (int i = 0; i < piece.end_index(); ++i)
 		piece[i] = (i % 26) + 'A';
 
 	if (!(flags & create_torrent::v2_only))
@@ -885,12 +912,10 @@ std::shared_ptr<torrent_info> create_torrent(std::ostream* file
 		}
 	}
 
-	std::vector<char> tmp;
-	std::back_insert_iterator<std::vector<char>> out(tmp);
-
 	entry tor = t.generate();
 
-	bencode(out, tor);
+	std::vector<char> tmp;
+	bencode(std::back_inserter(tmp), tor);
 	error_code ec;
 	return std::make_shared<torrent_info>(tmp, ec, from_span);
 }
@@ -950,7 +975,7 @@ setup_transfer(lt::session* ses1, lt::session* ses2, lt::session* ses3
 			remove_all(combine_path("tmp2" + suffix, "temporary"), ec);
 			remove_all(combine_path("tmp3" + suffix, "temporary"), ec);
 		}
-		std::printf("generated torrent: %s %s\n", aux::to_hex(t->info_hash().v2).c_str(), file_path.c_str());
+		std::printf("generated torrent: %s %s\n", aux::to_hex(t->info_hashes().v2).c_str(), file_path.c_str());
 	}
 	else
 	{
@@ -998,7 +1023,7 @@ setup_transfer(lt::session* ses1, lt::session* ses2, lt::session* ses3
 	if (use_metadata_transfer)
 	{
 		param.ti.reset();
-		param.info_hash = t->info_hash();
+		param.info_hash = t->info_hashes();
 	}
 	else if (torrent2)
 	{
@@ -1116,6 +1141,53 @@ void stop_web_server()
 	stop_process(web_server_pid);
 	web_server_pid = 0;
 }
+
+namespace {
+pid_type websocket_server_pid = 0;
+}
+
+int start_websocket_server(bool ssl, int min_interval)
+{
+	int port = 2000 + static_cast<int>(lt::random(6000));
+	error_code ec;
+	io_context ios;
+
+	// make sure the port we pick is free
+	do {
+		++port;
+		tcp::socket s(ios);
+		s.open(tcp::v4(), ec);
+		if (ec) break;
+		s.bind(tcp::endpoint(make_address("127.0.0.1")
+			, std::uint16_t(port)), ec);
+	} while (ec);
+
+	std::string python_exe = get_python();
+
+	char buf[200];
+	std::snprintf(buf, sizeof(buf), "%s ../websocket_server.py %d %d %d"
+		, python_exe.c_str(), port, ssl, min_interval);
+
+	std::printf("%s starting websocket server on port %d...\n", time_now_string(), port);
+
+	std::printf("%s\n", buf);
+	pid_type r = async_run(buf);
+	if (r == 0) abort();
+	websocket_server_pid = r;
+	std::printf("%s launched\n", time_now_string());
+	std::this_thread::sleep_for(lt::milliseconds(1000));
+	wait_for_port(port);
+	return port;
+}
+
+void stop_websocket_server()
+{
+	if (websocket_server_pid == 0) return;
+	std::printf("stopping websocket server\n");
+	stop_process(websocket_server_pid);
+	websocket_server_pid = 0;
+}
+
 
 tcp::endpoint ep(char const* ip, int port)
 {

@@ -39,7 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/instantiate_connection.hpp"
 #include "libtorrent/socket_io.hpp"
 #include "libtorrent/socket.hpp" // for TORRENT_HAS_DONT_FRAGMENT
-#include "libtorrent/broadcast_socket.hpp" // for is_teredo
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_teredo
 #include "libtorrent/random.hpp"
 #include "libtorrent/performance_counters.hpp"
 #include "libtorrent/aux_/time.hpp" // for aux::time_now()
@@ -89,16 +89,16 @@ namespace aux {
 	std::pair<int, int> utp_socket_manager::mtu_for_dest(address const& addr)
 	{
 		int mtu = 0;
-		if (is_teredo(addr)) mtu = TORRENT_TEREDO_MTU;
+		if (aux::is_teredo(addr)) mtu = TORRENT_TEREDO_MTU;
 		else mtu = TORRENT_ETHERNET_MTU;
 
 #if defined __APPLE__
 		// apple has a very strange loopback. It appears you can't
 		// send messages of the reported MTU size, and you don't get
 		// EWOULDBLOCK either.
-		if (is_loopback(addr))
+		if (addr.is_loopback())
 		{
-			if (is_teredo(addr)) mtu = TORRENT_TEREDO_MTU;
+			if (aux::is_teredo(addr)) mtu = TORRENT_TEREDO_MTU;
 			else mtu = TORRENT_ETHERNET_MTU;
 		}
 #endif
@@ -215,10 +215,10 @@ namespace aux {
 			utp_stream* str = nullptr;
 #ifdef TORRENT_SSL_PEERS
 			if (is_ssl(c))
-				str = &boost::get<ssl_stream<utp_stream>>(c).next_layer();
+				str = &std::get<ssl_stream<utp_stream>>(c).next_layer();
 			else
 #endif
-				str = boost::get<utp_stream>(&c);
+				str = std::get_if<utp_stream>(&c);
 
 			TORRENT_ASSERT(str);
 			int link_mtu, utp_mtu;
@@ -338,7 +338,7 @@ namespace aux {
 			recv_id = send_id - 1;
 		}
 		auto impl = std::make_unique<utp_socket_impl>(recv_id, send_id, str, *this);
-		auto const ret = impl.get();
+		auto* const ret = impl.get();
 		m_utp_sockets.emplace(recv_id, std::move(impl));
 		return ret;
 	}

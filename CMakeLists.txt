@@ -18,35 +18,22 @@ set(libtorrent_include_files
 	add_torrent_params
 	address
 	alert
-	alert_manager
 	alert_types
 	announce_entry
 	assert
-	bandwidth_limit
-	bandwidth_manager
-	bandwidth_queue_entry
-	bandwidth_socket
 	bdecode
 	bencode
 	bitfield
-	bloom_filter
-	broadcast_socket
-	bt_peer_connection
-	choker
+	client_data
 	close_reason
 	config
 	ConvertUTF
 	copy_ptr
-	crc32c
 	create_torrent
 	deadline_timer
 	debug
 	disk_buffer_holder
-	disk_buffer_pool
 	disk_interface
-	disk_io_job
-	disk_io_thread_pool
-	disk_job_pool
 	disk_observer
 	download_priority
 	entry
@@ -60,23 +47,15 @@ set(libtorrent_include_files
 	flags
 	fwd
 	gzip
-	hash_picker
 	hasher
 	hex
-	http_connection
-	http_parser
-	http_seed_connection
 	http_stream
 	http_tracker_connection
 	i2p_stream
 	identify_client
 	index_range
-	invariant_check
-	io
 	io_service
 	ip_filter
-	ip_voter
-	lazy_entry
 	link
 	lsd
 	magnet_uri
@@ -98,7 +77,6 @@ set(libtorrent_include_files
 	peer_connection_interface
 	peer_id
 	peer_info
-	peer_list
 	peer_request
 	performance_counters
 	pex_flags
@@ -113,8 +91,6 @@ set(libtorrent_include_files
 	read_resume_data
 	request_blocks
 	resolve_links
-	resolver
-	resolver_interface
 	session
 	session_handle
 	session_params
@@ -133,7 +109,6 @@ set(libtorrent_include_files
 	socks5_stream
 	span
 	ssl_stream
-	stack_allocator
 	stat
 	stat_cache
 	storage_defs
@@ -141,7 +116,6 @@ set(libtorrent_include_files
 	string_view
 	tailqueue
 	time
-	torrent
 	torrent_flags
 	torrent_handle
 	torrent_info
@@ -157,10 +131,8 @@ set(libtorrent_include_files
 	utf8
 	vector_utils
 	version
-	web_connection_base
-	web_peer_connection
 	write_resume_data
-	xml_parse)
+	ssl)
 
 set(libtorrent_kademlia_include_files
 	announce_flags
@@ -196,24 +168,38 @@ set(libtorrent_extensions_include_files
 	ut_pex)
 
 set(libtorrent_aux_include_files
+	alert_manager
 	aligned_storage
 	aligned_union
 	alloca
 	allocating_handler
 	array
+	bandwidth_limit
+	bandwidth_manager
+	bandwidth_queue_entry
+	bandwidth_socket
 	bind_to_device
 	buffer
+	bloom_filter
+	bt_peer_connection
+	keepalive
 	byteswap
 	chained_buffer
+	choker
 	cppint_import_export
 	cpuid
+	crc32c
 	deferred_handler
 	deprecated
 	deque
 	dev_random
 	disable_warnings_pop
 	disable_warnings_push
+	disk_buffer_pool
+	disk_io_job
+	disk_io_thread_pool
 	disk_job_fence
+	disk_job_pool
 	ed25519
 	escape_string
 	export
@@ -221,24 +207,35 @@ set(libtorrent_aux_include_files
 	file_progress
 	file_view_pool
 	has_block
+	hash_picker
 	heterogeneous_queue
+	http_connection
+	http_parser
+	http_seed_connection
+	invariant_check
 	instantiate_connection
 	io
+	io_bytes
+	ip_helpers
 	ip_notifier
+	ip_voter
 	listen_socket_handle
 	lsd
 	merkle
+	merkle_tree
 	noexcept_movable
 	numeric_cast
-	openssl
 	packet_buffer
 	packet_pool
 	path
+	peer_list
 	polymorphic_socket
 	portmap
 	proxy_settings
 	range
 	receive_buffer
+	resolver
+	resolver_interface
 	route
 	scope_end
 	session_call
@@ -248,6 +245,7 @@ set(libtorrent_aux_include_files
 	session_udp_sockets
 	set_socket_buffer
 	socket_type
+	stack_allocator
 	storage_utils
 	string_ptr
 	strview_less
@@ -255,14 +253,22 @@ set(libtorrent_aux_include_files
 	throw
 	time
 	timestamp_history
+	torrent
 	torrent_impl
 	torrent_list
 	unique_ptr
 	utp_socket_manager
 	utp_stream
 	vector
+	web_connection_base
+	web_peer_connection
 	win_crypto_provider
-	win_util)
+	win_util
+	rtc_signaling
+	rtc_stream
+	websocket_stream
+	websocket_tracker_connection
+	xml_parse)
 
 set(try_signal_include_files
 	try_signal
@@ -297,7 +303,6 @@ set(sources
 	file_storage
 	file_progress
 	generate_peer_id
-	lazy_bdecode
 	escape_string
 	string_util
 	file
@@ -314,6 +319,7 @@ set(sources
 	i2p_stream
 	identify_client
 	ip_filter
+	ip_helpers
 	ip_notifier
 	ip_voter
 	listen_socket_handle
@@ -327,6 +333,7 @@ set(sources
 	peer_connection_handle
 	instantiate_connection
 	merkle
+	merkle_tree
 	natpmp
 	part_file
 	packet_buffer
@@ -348,7 +355,6 @@ set(sources
 	session_handle
 	session_impl
 	session_settings
-	session_udp_sockets
 	proxy_settings
 	session_stats
 	settings_pack
@@ -380,11 +386,9 @@ set(sources
 	disk_job_fence
 	disk_job_pool
 	disk_buffer_pool
-	disk_interface
 	disk_io_thread_pool
 	disabled_disk_io
 	enum_net
-	broadcast_socket
 	magnet_uri
 	parse_url
 	ConvertUTF
@@ -399,6 +403,11 @@ set(sources
 	mmap_storage
 	posix_disk_io
 	posix_storage
+	ssl
+	rtc_signaling
+	rtc_stream
+	websocket_stream
+	websocket_tracker_connection
 
 # -- extensions --
 	ut_pex
@@ -465,27 +474,28 @@ feature_option(static_runtime "build libtorrent with static runtime" OFF)
 find_public_dependency(Threads REQUIRED)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES Clang)
-	add_compile_options(
-		-Weverything
-		-Wno-documentation
-		-Wno-c++98-compat-pedantic
-		-Wno-padded
-		-Wno-global-constructors
-		-Wno-exit-time-destructors
-		-Wno-weak-vtables
-		-Wno-return-std-move-in-c++11
-		-Wno-unknown-warning-option)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
+		-Weverything \
+		-Wno-documentation \
+		-Wno-c++98-compat-pedantic \
+		-Wno-c++11-compat-pedantic \
+		-Wno-padded \
+		-Wno-global-constructors \
+		-Wno-exit-time-destructors \
+		-Wno-weak-vtables \
+		-Wno-return-std-move-in-c++11 \
+		-Wno-unknown-warning-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES GNU)
-	add_compile_options(
-		-Wall
-		-Wextra
-		-Wpedantic
-		-Wparentheses
-		-Wvla
-		-Wc++11-compat
-		-Wno-format-zero-length
-		-Wno-noexcept-type
-		-ftemplate-depth=512)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
+		-Wall \
+		-Wextra \
+		-Wpedantic \
+		-Wparentheses \
+		-Wvla \
+		-Wno-c++11-compat \
+		-Wno-format-zero-length \
+		-Wno-noexcept-type \
+		-ftemplate-depth=512")
 elseif(MSVC)
 	add_compile_options(
 		/W4
@@ -510,12 +520,12 @@ if(static_runtime)
 	ucm_set_runtime(STATIC)
 	set(Boost_USE_MULTITHREADED ON)
 	set(Boost_USE_STATIC_RUNTIME ON)
-	set(OPENSSL_USE_STATIC_LIBS TRUE)
-	set(OPENSSL_MSVC_STATIC_RT TRUE)
+	set(OPENSSL_MSVC_STATIC_RT ON)
 endif()
 
 if (NOT BUILD_SHARED_LIBS)
 	set(Boost_USE_STATIC_LIBS ON)
+	set(OPENSSL_USE_STATIC_LIBS ON)
 endif()
 
 add_library(torrent-rasterbar
@@ -526,7 +536,7 @@ add_library(torrent-rasterbar
 	${libtorrent_aux_include_files}
 )
 
-select_cxx_standard(torrent-rasterbar 14)
+select_cxx_standard(torrent-rasterbar 17)
 
 if (BUILD_SHARED_LIBS)
 	target_compile_definitions(torrent-rasterbar
@@ -554,6 +564,7 @@ target_compile_definitions(torrent-rasterbar
 		$<$<CONFIG:Debug>:TORRENT_USE_ASSERTS>
 		BOOST_ASIO_ENABLE_CANCELIO
 		BOOST_ASIO_NO_DEPRECATED
+		_SILENCE_CXX17_ALLOCATOR_VOID_DEPRECATION_WARNING
 	PRIVATE
 		TORRENT_BUILDING_LIBRARY
 		_FILE_OFFSET_BITS=64
@@ -618,14 +629,19 @@ if(NOT build_tests) # tests require deprecated symbols
 endif()
 feature_option(encryption "Enables encryption in libtorrent" ON)
 feature_option(exceptions "build with exception support" ON)
+feature_option(gnutls "build using GnuTLS instead of OpenSSL" OFF)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME extensions DEFAULT ON
 	DESCRIPTION "Enables protocol extensions" DISABLED TORRENT_DISABLE_EXTENSIONS)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME i2p DEFAULT ON
 	DESCRIPTION "build with I2P support" DISABLED TORRENT_USE_I2P=0)
+target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME webtorrent DEFAULT OFF
+	DESCRIPTION "build with WebTorrent support" DISABLED TORRENT_USE_RTC=0)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME logging DEFAULT ON
 	DESCRIPTION "build with logging" DISABLED TORRENT_DISABLE_LOGGING)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME mutable-torrents DEFAULT ON
 	DESCRIPTION "Enables mutable torrent support" DISABLED TORRENT_DISABLE_MUTABLE_TORRENTS)
+target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME streaming DEFAULT ON
+	DESCRIPTION "Enables support for piece deadline" DISABLED TORRENT_DISABLE_STREAMING)
 
 find_public_dependency(Iconv)
 if(MSVC)
@@ -647,42 +663,74 @@ if(Iconv_FOUND)
 	target_link_libraries(torrent-rasterbar PRIVATE Iconv::Iconv)
 endif()
 
-find_public_dependency(OpenSSL)
-set_package_properties(OpenSSL
-	PROPERTIES
-		URL "https://www.openssl.org/"
-		DESCRIPTION "Full-strength general purpose cryptography library"
-		TYPE RECOMMENDED
-		PURPOSE "Provides HTTPS support to libtorrent"
-)
+if(NOT gnutls)
+	find_public_dependency(OpenSSL)
+	set_package_properties(OpenSSL
+		PROPERTIES
+			URL "https://www.openssl.org/"
+			DESCRIPTION "Full-strength general purpose cryptography library"
+			TYPE RECOMMENDED
+			PURPOSE "Provides HTTPS support to libtorrent"
+	)
 
-if(OPENSSL_FOUND)
-	target_link_libraries(torrent-rasterbar PUBLIC OpenSSL::SSL)
-	target_compile_definitions(torrent-rasterbar
-		PUBLIC
-			TORRENT_USE_LIBCRYPTO
-			TORRENT_USE_OPENSSL
-			TORRENT_SSL_PEERS
-			OPENSSL_NO_SSL2)
-	target_sources(torrent-rasterbar PRIVATE src/pe_crypto)
+	if(TARGET OpenSSL::SSL)
+		# TODO: needed until https://gitlab.kitware.com/cmake/cmake/issues/19263 is fixed
+		if(WIN32 AND OPENSSL_USE_STATIC_LIBS)
+			target_link_libraries(torrent-rasterbar PRIVATE crypt32)
+		endif()
+		target_link_libraries(torrent-rasterbar PUBLIC OpenSSL::SSL)
+		target_compile_definitions(torrent-rasterbar
+			PUBLIC
+				TORRENT_USE_OPENSSL
+				TORRENT_USE_LIBCRYPTO
+				TORRENT_SSL_PEERS
+				OPENSSL_NO_SSL2)
+	endif()
 endif()
 
-if(OPENSSL_FOUND)
-	target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_USE_LIBCRYPTO)
-else(OPENSSL_FOUND)
-	find_public_dependency(LibGcrypt)
-	set_package_properties(LibGcrypt
+if(gnutls OR NOT TARGET OpenSSL::SSL)
+	find_public_dependency(GnuTLS)
+	set_package_properties(GnuTLS
 		PROPERTIES
-			URL "https://www.gnupg.org/software/libgcrypt/index.html"
-			DESCRIPTION "A general purpose cryptographic library"
+			URL "https://www.gnutls.org/"
+			DESCRIPTION "GnuTLS is a free software implementation of the TLS and DTLS protocols"
 			TYPE RECOMMENDED
-			PURPOSE "Use GCrypt instead of the built-in functions for RC4 and SHA1"
+			PURPOSE "Provides HTTPS support to libtorrent"
 	)
-	if (LibGcrypt_FOUND)
-		target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_USE_LIBGCRYPT)
-		target_link_libraries(torrent-rasterbar PRIVATE LibGcrypt::LibGcrypt)
+	if(GNUTLS_FOUND)
+		target_link_libraries(torrent-rasterbar PUBLIC GnuTLS::GnuTLS)
+		target_compile_definitions(torrent-rasterbar
+			PUBLIC
+				TORRENT_USE_GNUTLS
+				TORRENT_SSL_PEERS)
+		target_include_directories(torrent-rasterbar PUBLIC
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/asio-gnutls/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+		install(DIRECTORY deps/asio-gnutls/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+	elseif(gnutls)
+		message(FATAL_ERROR "GnuTLS library not found")
 	endif()
-endif(OPENSSL_FOUND)
+endif()
+
+if (NOT GNUTLS_FOUND AND NOT TARGET OpenSSL::SSL)
+	if(TARGET OpenSSL::Crypto)
+		target_link_libraries(torrent-rasterbar PUBLIC OpenSSL::Crypto)
+		target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_USE_LIBCRYPTO)
+	else()
+		find_public_dependency(LibGcrypt)
+		set_package_properties(LibGcrypt
+			PROPERTIES
+				URL "https://www.gnupg.org/software/libgcrypt/index.html"
+				DESCRIPTION "A general purpose cryptographic library"
+				TYPE RECOMMENDED
+				PURPOSE "Use GCrypt instead of the built-in functions for RC4 and SHA1"
+		)
+		if (LibGcrypt_FOUND)
+			target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_USE_LIBGCRYPT)
+			target_link_libraries(torrent-rasterbar PRIVATE LibGcrypt::LibGcrypt)
+		endif()
+	endif()
+endif()
 
 if (encryption)
 	target_sources(torrent-rasterbar PRIVATE src/pe_crypto)
@@ -696,9 +744,29 @@ if (dht)
 		${ed25519_sources}
 		${libtorrent_kademlia_include_files}
 	)
-	target_include_directories(torrent-rasterbar PRIVATE ed25519/src)
 else()
 	target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_DISABLE_DHT)
+endif()
+
+if (webtorrent)
+	option(NO_WEBSOCKET "Disable WebSocket support in libdatachannel" ON)
+	if(GNUTLS_FOUND)
+		option(USE_GNUTLS "Use GnuTLS instead of OpenSSL for libdatachannel" ON)
+	else()
+		option(USE_GNUTLS "Use GnuTLS instead of OpenSSL for libdatachannel" OFF)
+	endif()
+	add_subdirectory(deps/libdatachannel EXCLUDE_FROM_ALL)
+	if(CMAKE_CXX_COMPILER_ID MATCHES Clang|GNU)
+		target_compile_options(datachannel-static PRIVATE
+			-Wno-pedantic
+			-Wno-unused-parameter
+			-Wno-unused-variable
+			-Wno-format-nonliteral)
+	endif()
+	if(CMAKE_CXX_COMPILER_ID MATCHES GNU)
+		target_compile_options(usrsctp-static PRIVATE
+			-Wno-format-truncation)
+	endif()
 endif()
 
 # Boost
@@ -773,6 +841,12 @@ endif()
 include(CheckCXXCompilerFlag)
 
 add_subdirectory(bindings)
+
+if(webtorrent)
+target_link_libraries(torrent-rasterbar PRIVATE LibDataChannel::LibDataChannelStatic)
+target_include_directories(torrent-rasterbar PRIVATE deps/json/include)
+target_compile_definitions(torrent-rasterbar PRIVATE BOOST_JSON_HEADER_ONLY)
+endif()
 
 install(TARGETS torrent-rasterbar EXPORT LibtorrentRasterbarTargets
 	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

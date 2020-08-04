@@ -201,9 +201,9 @@ bool show_dht_status = false;
 bool sequential_download = false;
 
 bool print_ip = true;
+bool print_local_ip = false;
 bool print_timers = false;
 bool print_block = false;
-bool print_peer_rate = false;
 bool print_fails = false;
 bool print_send_bufs = true;
 bool print_disk_stats = false;
@@ -328,13 +328,13 @@ int print_peer_info(std::string& out
 	using namespace lt;
 	int pos = 0;
 	if (print_ip) out += "IP                             ";
+	if (print_local_ip) out += "local IP                       ";
 	out += "progress        down     (total | peak   )  up      (total | peak   ) sent-req tmo bsy rcv flags         dn  up  source  ";
 	if (print_fails) out += "fail hshf ";
 	if (print_send_bufs) out += "rq sndb (recvb |alloc | wmrk ) q-bytes ";
 	if (print_timers) out += "inactive wait timeout q-time ";
 	out += "  v disk ^    rtt  ";
 	if (print_block) out += "block-progress ";
-	if (print_peer_rate) out += "est.rec.rate ";
 	out += "client \x1b[K\n";
 	++pos;
 
@@ -354,6 +354,11 @@ int print_peer_info(std::string& out
 				(i->flags & peer_info::utp_socket ? " [uTP]" : "") +
 				(i->flags & peer_info::i2p_socket ? " [i2p]" : "")
 				).c_str());
+			out += str;
+		}
+		if (print_local_ip)
+		{
+			std::snprintf(str, sizeof(str), "%-30s ", ::print_endpoint(i->local_endpoint).c_str());
 			out += str;
 		}
 
@@ -460,14 +465,6 @@ int print_peer_info(std::string& out
 			}
 		}
 
-		if (print_peer_rate)
-		{
-			bool const unchoked = !(i->flags & lt::peer_info::choked);
-
-			std::snprintf(str, sizeof(str), " %s"
-				, unchoked ? add_suffix(i->estimated_reciprocation_rate, "/s").c_str() : "      ");
-			out += str;
-		}
 		out += " ";
 
 		if (i->flags & lt::peer_info::handshake)
@@ -503,6 +500,7 @@ int poll_interval = 5;
 int max_connections_per_torrent = 50;
 bool seed_mode = false;
 bool stats_enabled = false;
+bool exit_on_finish = false;
 
 bool share_mode = false;
 
@@ -528,6 +526,125 @@ void print_settings(int const start, int const num
 	}
 }
 
+void assign_setting(lt::settings_pack& settings, std::string const& key, char const* value)
+{
+	int const sett_name = lt::setting_by_name(key);
+	if (sett_name < 0)
+	{
+		std::fprintf(stderr, "unknown setting: \"%s\"\n", key.c_str());
+		std::exit(1);
+	}
+
+	using lt::settings_pack;
+
+	switch (sett_name & settings_pack::type_mask)
+	{
+		case settings_pack::string_type_base:
+			settings.set_str(sett_name, value);
+			break;
+		case settings_pack::bool_type_base:
+			if (value == "1"_sv || value == "on"_sv || value == "true"_sv)
+			{
+				settings.set_bool(sett_name, true);
+			}
+			else if (value == "0"_sv || value == "off"_sv || value == "false"_sv)
+			{
+				settings.set_bool(sett_name, false);
+			}
+			else
+			{
+				std::fprintf(stderr, "invalid value for \"%s\". expected 0 or 1\n"
+					, key.c_str());
+				std::exit(1);
+			}
+			break;
+		case settings_pack::int_type_base:
+			using namespace lt::literals;
+			static std::map<lt::string_view, int> const enums = {
+				{"no_piece_suggestions"_sv, settings_pack::no_piece_suggestions},
+				{"suggest_read_cache"_sv, settings_pack::suggest_read_cache},
+				{"fixed_slots_choker"_sv, settings_pack::fixed_slots_choker},
+				{"rate_based_choker"_sv, settings_pack::rate_based_choker},
+				{"round_robin"_sv, settings_pack::round_robin},
+				{"fastest_upload"_sv, settings_pack::fastest_upload},
+				{"anti_leech"_sv, settings_pack::anti_leech},
+				{"enable_os_cache"_sv, settings_pack::enable_os_cache},
+				{"disable_os_cache"_sv, settings_pack::disable_os_cache},
+				{"prefer_tcp"_sv, settings_pack::prefer_tcp},
+				{"peer_proportional"_sv, settings_pack::peer_proportional},
+				{"pe_forced"_sv, settings_pack::pe_forced},
+				{"pe_enabled"_sv, settings_pack::pe_enabled},
+				{"pe_disabled"_sv, settings_pack::pe_disabled},
+				{"pe_plaintext"_sv, settings_pack::pe_plaintext},
+				{"pe_rc4"_sv, settings_pack::pe_rc4},
+				{"pe_both"_sv, settings_pack::pe_both},
+				{"none"_sv, settings_pack::none},
+				{"socks4"_sv, settings_pack::socks4},
+				{"socks5"_sv, settings_pack::socks5},
+				{"socks5_pw"_sv, settings_pack::socks5_pw},
+				{"http"_sv, settings_pack::http},
+				{"http_pw"_sv, settings_pack::http_pw},
+				{"i2p_proxy"_sv, settings_pack::i2p_proxy},
+			};
+
+			{
+				auto const it = enums.find(lt::string_view(value));
+				if (it != enums.end())
+				{
+					settings.set_int(sett_name, it->second);
+					break;
+				}
+			}
+
+			static std::map<lt::string_view, lt::alert_category_t> const alert_categories = {
+				{"error"_sv, lt::alert_category::error},
+				{"peer"_sv, lt::alert_category::peer},
+				{"port_mapping"_sv, lt::alert_category::port_mapping},
+				{"storage"_sv, lt::alert_category::storage},
+				{"tracker"_sv, lt::alert_category::tracker},
+				{"connect"_sv, lt::alert_category::connect},
+				{"status"_sv, lt::alert_category::status},
+				{"ip_block"_sv, lt::alert_category::ip_block},
+				{"performance_warning"_sv, lt::alert_category::performance_warning},
+				{"dht"_sv, lt::alert_category::dht},
+				{"session_log"_sv, lt::alert_category::session_log},
+				{"torrent_log"_sv, lt::alert_category::torrent_log},
+				{"peer_log"_sv, lt::alert_category::peer_log},
+				{"incoming_request"_sv, lt::alert_category::incoming_request},
+				{"dht_log"_sv, lt::alert_category::dht_log},
+				{"dht_operation"_sv, lt::alert_category::dht_operation},
+				{"port_mapping_log"_sv, lt::alert_category::port_mapping_log},
+				{"picker_log"_sv, lt::alert_category::picker_log},
+				{"file_progress"_sv, lt::alert_category::file_progress},
+				{"piece_progress"_sv, lt::alert_category::piece_progress},
+				{"upload"_sv, lt::alert_category::upload},
+				{"block_progress"_sv, lt::alert_category::block_progress},
+				{"all"_sv, lt::alert_category::all},
+			};
+
+			std::stringstream flags(value);
+			std::string f;
+			lt::alert_category_t val;
+			while (std::getline(flags, f, ',')) try
+			{
+				auto const it = alert_categories.find(f);
+				if (it == alert_categories.end())
+					val |= lt::alert_category_t{unsigned(std::stoi(f))};
+				else
+					val |= it->second;
+			}
+			catch (std::invalid_argument const&)
+			{
+				std::fprintf(stderr, "invalid value for \"%s\". expected integer or enum value\n"
+					, key.c_str());
+				std::exit(1);
+			}
+
+			settings.set_int(sett_name, val);
+			break;
+	}
+}
+
 std::string resume_file(lt::info_hash_t const& info_hash)
 {
 	return path_append(save_path, path_append(".resume"
@@ -550,12 +667,12 @@ void set_torrent_params(lt::add_torrent_params& p)
 void add_magnet(lt::session& ses, lt::string_view uri)
 {
 	lt::error_code ec;
-	lt::add_torrent_params p = lt::parse_magnet_uri(uri.to_string(), ec);
+	lt::add_torrent_params p = lt::parse_magnet_uri(uri, ec);
 
 	if (ec)
 	{
 		std::printf("invalid magnet link \"%s\": %s\n"
-			, uri.to_string().c_str(), ec.message().c_str());
+			, std::string(uri).c_str(), ec.message().c_str());
 		return;
 	}
 
@@ -568,12 +685,12 @@ void add_magnet(lt::session& ses, lt::string_view uri)
 
 	set_torrent_params(p);
 
-	std::printf("adding magnet: %s\n", uri.to_string().c_str());
+	std::printf("adding magnet: %s\n", std::string(uri).c_str());
 	ses.async_add_torrent(std::move(p));
 }
 
 // return false on failure
-bool add_torrent(lt::session& ses, std::string torrent)
+bool add_torrent(lt::session& ses, std::string const torrent)
 {
 	using lt::add_torrent_params;
 	using lt::storage_mode_t;
@@ -594,7 +711,7 @@ bool add_torrent(lt::session& ses, std::string torrent)
 	add_torrent_params p;
 
 	std::vector<char> resume_data;
-	if (load_file(resume_file(ti->info_hash()), resume_data))
+	if (load_file(resume_file(ti->info_hashes()), resume_data))
 	{
 		p = lt::read_resume_data(resume_data, ec);
 		if (ec) std::printf("  failed to load resume data: %s\n", ec.message().c_str());
@@ -627,9 +744,9 @@ std::vector<std::string> list_dir(std::string path
 
 	do
 	{
-		lt::string_view p = fd.cFileName;
+		lt::string_view const p = fd.cFileName;
 		if (filter_fun(p))
-			ret.push_back(p.to_string());
+			ret.emplace_back(p);
 
 	} while (FindNextFileA(handle, &fd));
 	FindClose(handle);
@@ -648,9 +765,9 @@ std::vector<std::string> list_dir(std::string path
 	struct dirent* de;
 	while ((de = readdir(handle)))
 	{
-		lt::string_view p(de->d_name);
+		lt::string_view const p(de->d_name);
 		if (filter_fun(p))
-			ret.push_back(p.to_string());
+			ret.emplace_back(p);
 	}
 	closedir(handle);
 #endif
@@ -700,11 +817,11 @@ void print_alert(lt::alert const* a, std::string& str)
 {
 	using namespace lt;
 
-	if (a->category() & alert::error_notification)
+	if (a->category() & alert_category::error)
 	{
 		str += esc("31");
 	}
-	else if (a->category() & (alert::peer_notification | alert::storage_notification))
+	else if (a->category() & (alert_category::peer | alert_category::storage))
 	{
 		str += esc("33");
 	}
@@ -714,8 +831,12 @@ void print_alert(lt::alert const* a, std::string& str)
 	str += a->message();
 	str += esc("0");
 
+	static auto const first_ts = a->timestamp();
+
 	if (g_log_file)
-		std::fprintf(g_log_file, "[%s] %s\n", timestamp(),  a->message().c_str());
+		std::fprintf(g_log_file, "[%" PRId64 "] %s\n"
+			, duration_cast<std::chrono::milliseconds>(a->timestamp() - first_ts).count()
+			,  a->message().c_str());
 }
 
 int save_file(std::string const& filename, std::vector<char> const& v)
@@ -752,7 +873,7 @@ bool handle_alert(torrent_view& view, session_view& ses_view
 	if (torrent_need_cert_alert* p = alert_cast<torrent_need_cert_alert>(a))
 	{
 		torrent_handle h = p->handle;
-		std::string base_name = path_append("certificates", to_hex(h.info_hash().get_best()));
+		std::string base_name = path_append("certificates", to_hex(h.info_hash()));
 		std::string cert = base_name + ".pem";
 		std::string priv = base_name + "_key.pem";
 
@@ -863,14 +984,13 @@ bool handle_alert(torrent_view& view, session_view& ses_view
 		torrent_handle h = p->handle;
 		h.save_resume_data(torrent_handle::save_info_dict);
 		++num_outstanding_resume_data;
+		if (exit_on_finish) quit = true;
 	}
 	else if (save_resume_data_alert* p = alert_cast<save_resume_data_alert>(a))
 	{
 		--num_outstanding_resume_data;
-		torrent_handle h = p->handle;
 		auto const buf = write_resume_data_buf(p->params);
-		torrent_status st = h.status(torrent_handle::query_save_path);
-		save_file(resume_file(st.info_hash), buf);
+		save_file(resume_file(p->params.info_hash), buf);
 	}
 	else if (save_resume_data_failed_alert* p = alert_cast<save_resume_data_failed_alert>(a))
 	{
@@ -1022,7 +1142,8 @@ CLIENT OPTIONS
                         are present and check hashes on-demand)
   -e <loops>            exit client after the specified number of iterations
                         through the main loop
-  -O                    print session stats counters to the log)"
+  -O                    print session stats counters to the log
+  -1                    exit on first torrent completing (useful for benchmarks))"
 #ifdef TORRENT_UTP_LOG_ENABLE
 R"(
   -q                    Enable uTP transport-level verbose logging
@@ -1057,12 +1178,17 @@ DISK OPTIONS
 TORRENT is a path to a .torrent file
 MAGNETURL is a magnet link
 
-example alert_masks:
-   dht | errors                   =  1025
-   peer-log | errors              = 32769
-   torrent-log | errors           = 16385
-   ses-log | errors               =  8193
-   ses-log | torrent-log | errors = 24578
+alert mask flags:
+	error peer port_mapping storage tracker connect status ip_block
+	performance_warning dht session_log torrent_log peer_log incoming_request
+	dht_log dht_operation port_mapping_log picker_log file_progress piece_progress
+	upload block_progress all
+
+examples:
+  --alert_mask=error,port_mapping,tracker,connect,session_log
+  --alert_mask=error,session_log,torrent_log,peer_log
+  --alert_mask=error,dht,dht_log,dht_operation
+  --alert_mask=all
 )") ;
 		return 0;
 	}
@@ -1089,20 +1215,20 @@ example alert_masks:
 
 	settings.set_str(settings_pack::user_agent, "client_test/" LIBTORRENT_VERSION);
 	settings.set_int(settings_pack::alert_mask
-		, alert::error_notification
-		| alert::peer_notification
-		| alert::port_mapping_notification
-		| alert::storage_notification
-		| alert::tracker_notification
-		| alert::connect_notification
-		| alert::status_notification
-		| alert::ip_block_notification
-		| alert::performance_warning
-		| alert::dht_notification
-		| alert::incoming_request_notification
-		| alert::dht_operation_notification
-		| alert::port_mapping_log_notification
-		| alert::file_progress_notification);
+		, lt::alert_category::error
+		| lt::alert_category::peer
+		| lt::alert_category::port_mapping
+		| lt::alert_category::storage
+		| lt::alert_category::tracker
+		| lt::alert_category::connect
+		| lt::alert_category::status
+		| lt::alert_category::ip_block
+		| lt::alert_category::performance_warning
+		| lt::alert_category::dht
+		| lt::alert_category::incoming_request
+		| lt::alert_category::dht_operation
+		| lt::alert_category::port_mapping_log
+		| lt::alert_category::file_progress);
 
 	lt::time_duration refresh_delay = lt::milliseconds(500);
 	bool rate_limit_locals = false;
@@ -1148,34 +1274,7 @@ example alert_masks:
 			std::string const key(start, equal - start);
 			char const* value = equal + 1;
 
-			int const sett_name = lt::setting_by_name(key);
-			if (sett_name < 0)
-			{
-				std::fprintf(stderr, "unknown setting: \"%s\"\n", key.c_str());
-				return 1;
-			}
-
-			switch (sett_name & settings_pack::type_mask)
-			{
-				case settings_pack::string_type_base:
-					settings.set_str(sett_name, value);
-					break;
-				case settings_pack::bool_type_base:
-					if (value == "0"_sv || value == "1"_sv)
-					{
-						settings.set_bool(sett_name, atoi(value) != 0);
-					}
-					else
-					{
-						std::fprintf(stderr, "invalid value for \"%s\". expected 0 or 1\n"
-							, key.c_str());
-						return 1;
-					}
-					break;
-				case settings_pack::int_type_base:
-					settings.set_int(sett_name, atoi(value));
-					break;
-			}
+			assign_setting(settings, key, value);
 			continue;
 		}
 
@@ -1191,6 +1290,7 @@ example alert_masks:
 			case 'G': seed_mode = true; --i; break;
 			case 's': save_path = make_absolute_path(arg); break;
 			case 'O': stats_enabled = true; --i; break;
+			case '1': exit_on_finish = true; --i; break;
 #ifdef TORRENT_UTP_LOG_ENABLE
 			case 'q':
 				lt::set_utp_stream_logging(true);
@@ -1281,7 +1381,7 @@ example alert_masks:
 	for (auto const& i : torrents)
 	{
 		if (i.substr(0, 7) == "magnet:") add_magnet(ses, i);
-		else add_torrent(ses, i.to_string());
+		else add_torrent(ses, std::string(i));
 	}
 
 	std::thread resume_data_loader([&ses]
@@ -1435,6 +1535,16 @@ example alert_masks:
 					else ses.pause();
 				}
 
+				if (c == '[' && h.is_valid())
+				{
+					h.queue_position_up();
+				}
+
+				if (c == ']' && h.is_valid())
+				{
+					h.queue_position_down();
+				}
+
 				// add magnet link
 				if (c == 'm')
 				{
@@ -1459,18 +1569,12 @@ example alert_masks:
 				if (c == 'W' && h.is_valid())
 				{
 					std::set<std::string> seeds = h.url_seeds();
-					for (std::set<std::string>::iterator i = seeds.begin()
-						, end(seeds.end()); i != end; ++i)
-					{
-						h.remove_url_seed(*i);
-					}
+					for (auto const& s : seeds)
+						h.remove_url_seed(s);
 
 					seeds = h.http_seeds();
-					for (std::set<std::string>::iterator i = seeds.begin()
-						, end(seeds.end()); i != end; ++i)
-					{
-						h.remove_http_seed(*i);
-					}
+					for (auto const& s : seeds)
+						h.remove_http_seed(s);
 				}
 
 				if (c == 'D' && h.is_valid())
@@ -1599,9 +1703,9 @@ example alert_masks:
 				if (c == '2') print_connecting_peers = !print_connecting_peers;
 				if (c == '3') print_timers = !print_timers;
 				if (c == '4') print_block = !print_block;
-				if (c == '5') print_peer_rate = !print_peer_rate;
 				if (c == '6') print_fails = !print_fails;
 				if (c == '7') print_send_bufs = !print_send_bufs;
+				if (c == '8') print_local_ip = !print_local_ip;
 				if (c == 'h')
 				{
 					clear_screen();
@@ -1620,7 +1724,9 @@ TORRENT ACTIONS
 [v] scrape                                      [D] delete torrent and data
 [r] force reannounce                            [R] save resume data for all torrents
 [o] set piece deadlines (sequential dl)         [P] toggle auto-managed
-[k] toggle force-started
+[k] toggle force-started                        [W] remove all web seeds
+ [  move queue position closer to beginning
+ ]  move queue position closer to end
 
 DISPLAY OPTIONS
 left/right arrow keys: select torrent filter
@@ -1634,8 +1740,8 @@ up/down arrow keys: select torrent
 COLUMN OPTIONS
 [1] toggle IP column                            [2] toggle show peer connection attempts
 [3] toggle timers column                        [4] toggle block progress column
-[5] toggle peer rate column                     [6] toggle failures column
-[7] toggle send buffers column
+                                                [6] toggle failures column
+[7] toggle send buffers column                  [8] toggle local IP column
 )");
 					int tmp;
 					while (sleep_and_input(&tmp, lt::milliseconds(500)) == false);
@@ -1730,7 +1836,29 @@ COLUMN OPTIONS
 				h.get_peer_info(peers);
 
 			if (print_peers && !peers.empty())
+			{
+				using lt::peer_info;
+				// sort connecting towards the bottom of the list, and by peer_id
+				// otherwise, to keep the list as stable as possible
+				std::sort(peers.begin(), peers.end()
+					, [](peer_info const& lhs, peer_info const& rhs)
+					{
+						{
+							bool const l = bool(lhs.flags & peer_info::connecting);
+							bool const r = bool(rhs.flags & peer_info::connecting);
+							if (l != r) return l < r;
+						}
+
+						{
+							bool const l = bool(lhs.flags & peer_info::handshake);
+							bool const r = bool(rhs.flags & peer_info::handshake);
+							if (l != r) return l < r;
+						}
+
+						return lhs.pid < rhs.pid;
+					});
 				pos += print_peer_info(out, peers, terminal_height - pos - 2);
+			}
 
 			if (print_trackers)
 			{
@@ -1742,25 +1870,39 @@ COLUMN OPTIONS
 				std::vector<lt::announce_entry> tr = h.trackers();
 				for (lt::announce_entry const& ae : h.trackers())
 				{
-					for (lt::announce_endpoint const& aep : ae.endpoints)
+					std::snprintf(str, sizeof(str), "%2d %-55s %s\x1b[K\n"
+						, ae.tier, ae.url.c_str(), ae.verified?"OK ":"-  ");
+					out += str;
+					pos += 1;
+					int idx = 0;
+					for (auto const& ep : ae.endpoints)
 					{
+						++idx;
+						if (pos + 1 >= terminal_height) break;
+						if (!ep.enabled) continue;
 						for (lt::protocol_version const v : {lt::protocol_version::V1, lt::protocol_version::V2})
 						{
-							if (pos + 1 >= terminal_height) break;
 							if (!s.info_hash.has(v)) continue;
-							std::snprintf(str, sizeof(str), "%2d %d %-20s %-55s fails: %-3d (%-3d) %s %s %5d \"%s\" %s\x1b[K\n"
-								, ae.tier, int(v), trunc(print_endpoint(aep.local_endpoint), 20).c_str()
-								, ae.url.c_str()
-								, aep.info_hashes[v].fails
-								, ae.fail_limit, ae.verified ? "OK " : "-  "
-								, to_string(int(total_seconds(aep.info_hashes[v].next_announce - now)), 8).c_str()
-								, aep.info_hashes[v].min_announce > now ? int(total_seconds(aep.info_hashes[v].min_announce - now)) : 0
-								, aep.info_hashes[v].last_error ? aep.info_hashes[v].last_error.message().c_str() : ""
-								, aep.info_hashes[v].message.c_str());
+							auto const& av = ep.info_hashes[v];
+
+							std::snprintf(str, sizeof(str), "  [%2d] fails: %-3d (%-3d) %s %5d \"%s\" %s\x1b[K\n"
+								, idx
+								, av.fails, ae.fail_limit
+								, to_string(int(total_seconds(av.next_announce - now)), 8).c_str()
+								, av.min_announce > now ? int(total_seconds(av.min_announce - now)) : 0
+								, av.last_error ? av.last_error.message().c_str() : ""
+								, av.message.c_str());
 							out += str;
 							pos += 1;
+							// we only need to show this error once, not for every
+							// endpoint
+							if (av.last_error == boost::asio::error::host_not_found)
+								goto done;
 						}
 					}
+done:
+
+					if (pos + 1 >= terminal_height) break;
 				}
 			}
 
@@ -1818,8 +1960,7 @@ COLUMN OPTIONS
 
 			if (print_file_progress && s.has_metadata)
 			{
-				std::vector<std::int64_t> file_progress;
-				h.file_progress(file_progress);
+				std::vector<std::int64_t> const file_progress = h.file_progress();
 				std::vector<lt::open_file_state> file_status = h.file_status();
 				std::vector<lt::download_priority_t> file_prio = h.get_file_priorities();
 				auto f = file_status.begin();
@@ -1840,7 +1981,7 @@ COLUMN OPTIONS
 
 					bool const complete = file_progress[idx] == ti->files().file_size(i);
 
-					std::string title = ti->files().file_name(i).to_string();
+					std::string title{ti->files().file_name(i)};
 					if (!complete)
 					{
 						std::snprintf(str, sizeof(str), " (%.1f%%)", progress / 10.f);

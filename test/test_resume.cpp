@@ -43,6 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/bencode.hpp"
 #include "libtorrent/read_resume_data.hpp"
 #include "libtorrent/write_resume_data.hpp"
+#include "libtorrent/aux_/path.hpp"
 #include "setup_transfer.hpp"
 
 #include "test.hpp"
@@ -79,7 +80,7 @@ std::vector<char> generate_resume_data(torrent_info* ti
 
 	rd["file-format"] = "libtorrent resume file";
 	rd["file-version"] = 1;
-	rd["info-hash"] = ti->info_hash().v1.to_string();
+	rd["info-hash"] = ti->info_hashes().v1.to_string();
 	rd["blocks per piece"] = std::max(1, ti->piece_length() / 0x4000);
 	rd["pieces"] = std::string(std::size_t(ti->num_pieces()), '\x01');
 
@@ -137,7 +138,8 @@ torrent_handle test_resume_flags(lt::session& ses
 	, char const* file_priorities = "1111", char const* resume_file_prio = ""
 	, bool const test_deprecated = false)
 {
-	std::shared_ptr<torrent_info> ti = generate_torrent();
+	std::shared_ptr<torrent_info> ti = generate_torrent(
+		bool(flags & torrent_flags::seed_mode));
 
 	add_torrent_params p;
 	std::vector<char> rd = generate_resume_data(ti.get(), resume_file_prio);
@@ -163,11 +165,18 @@ torrent_handle test_resume_flags(lt::session& ses
 
 	p.ti = ti;
 	p.flags = flags;
+	if (flags & torrent_flags::seed_mode)
+	{
+		p.save_path = ".";
+	}
+	else
+	{
 #ifdef TORRENT_WINDOWS
-	p.save_path = "c:\\add_torrent_params save_path";
+		p.save_path = "c:\\add_torrent_params save_path";
 #else
-	p.save_path = "/add_torrent_params save_path";
+		p.save_path = "/add_torrent_params save_path";
 #endif
+	}
 
 	if (file_priorities[0])
 	{
@@ -180,7 +189,7 @@ torrent_handle test_resume_flags(lt::session& ses
 
 	torrent_handle h = ses.add_torrent(p);
 	torrent_status s = h.status();
-	TEST_EQUAL(s.info_hash, ti->info_hash());
+	TEST_EQUAL(s.info_hash, ti->info_hashes());
 	return h;
 }
 
@@ -446,7 +455,7 @@ TORRENT_TEST(piece_slots)
 
 	torrent_status s = h.status();
 	print_alerts(ses, "ses");
-	TEST_EQUAL(s.info_hash, ti->info_hash());
+	TEST_EQUAL(s.info_hash, ti->info_hashes());
 	TEST_EQUAL(s.pieces.size(), ti->num_pieces());
 	TEST_CHECK(s.pieces.size() >= 4);
 	TEST_EQUAL(s.pieces[piece_index_t{0}], true);
@@ -503,7 +512,7 @@ void test_piece_slots_seed(settings_pack const& sett)
 
 	torrent_status s = h.status();
 	print_alerts(ses, "ses");
-	TEST_EQUAL(s.info_hash, ti->info_hash());
+	TEST_EQUAL(s.info_hash, ti->info_hashes());
 	TEST_EQUAL(s.pieces.size(), ti->num_pieces());
 	for (auto const i : ti->piece_range())
 	{
@@ -546,7 +555,7 @@ TORRENT_TEST(piece_slots_seed_suggest_cache)
 }
 
 // TODO: test what happens when loading a resume file with both piece priorities
-// and file priorities (file prio should take presedence)
+// and file priorities (file prio should take precedence)
 
 // TODO: make sure a resume file only ever contain file priorities OR piece
 // priorities. Never both.
@@ -605,6 +614,7 @@ TORRENT_TEST(file_priorities_override_resume_deprecated)
 	TEST_EQUAL(file_priorities[2], 3);
 }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 TORRENT_TEST(file_priorities_resume_share_mode_deprecated)
 {
 	// in share mode file priorities should always be 0
@@ -630,6 +640,7 @@ TORRENT_TEST(file_priorities_share_mode_deprecated)
 	TEST_EQUAL(file_priorities[1], 0);
 	TEST_EQUAL(file_priorities[2], 0);
 }
+#endif
 
 TORRENT_TEST(resume_save_load_deprecated)
 {
@@ -792,11 +803,6 @@ TORRENT_TEST(seed_mode_deprecated)
 	torrent_status s = test_resume_flags(ses, torrent_flags::override_resume_data
 		| torrent_flags::seed_mode, "", "", true).status();
 	default_tests(s);
-#ifdef TORRENT_WINDOWS
-	TEST_EQUAL(s.save_path, "c:\\add_torrent_params save_path");
-#else
-	TEST_EQUAL(s.save_path, "/add_torrent_params save_path");
-#endif
 	TEST_EQUAL(s.flags & flags_mask, torrent_flags::seed_mode);
 	TEST_EQUAL(s.connections_limit, 2);
 	TEST_EQUAL(s.uploads_limit, 1);
@@ -818,6 +824,7 @@ TORRENT_TEST(upload_mode_deprecated)
 	TEST_EQUAL(s.uploads_limit, 1346);
 }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 TORRENT_TEST(share_mode_deprecated)
 {
 	lt::session ses(settings());
@@ -834,6 +841,7 @@ TORRENT_TEST(share_mode_deprecated)
 	TEST_EQUAL(s.connections_limit, 2);
 	TEST_EQUAL(s.uploads_limit, 1);
 }
+#endif
 
 TORRENT_TEST(auto_managed_deprecated)
 {
@@ -927,6 +935,7 @@ TORRENT_TEST(file_priorities_default)
 	TEST_EQUAL(file_priorities[2], 4_pri);
 }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 TORRENT_TEST(file_priorities_resume_share_mode)
 {
 	// in share mode file priorities should always be 0
@@ -952,6 +961,7 @@ TORRENT_TEST(file_priorities_share_mode)
 	TEST_EQUAL(file_priorities[1], 0_pri);
 	TEST_EQUAL(file_priorities[2], 0_pri);
 }
+#endif
 
 namespace {
 
@@ -969,7 +979,7 @@ void test_zero_file_prio(bool test_deprecated = false, bool mix_prios = false)
 
 	rd["file-format"] = "libtorrent resume file";
 	rd["file-version"] = 1;
-	rd["info-hash"] = ti->info_hash().v1.to_string();
+	rd["info-hash"] = ti->info_hashes().v1.to_string();
 	rd["blocks per piece"] = std::max(1, ti->piece_length() / 0x4000);
 
 	// set file priorities to 0
@@ -1033,9 +1043,8 @@ TORRENT_TEST(backwards_compatible_resume_info_dict)
 	entry rd;
 	rd["file-format"] = "libtorrent resume file";
 	rd["name"] = ti->name();
-	rd["info-hash"] = ti->info_hash().v1;
-	auto metainfo = ti->metadata();
-	rd["info"] = bdecode({metainfo.get(), ti->metadata_size()});
+	rd["info-hash"] = ti->info_hashes().v1;
+	rd["info"] = bdecode(ti->info_section());
 	std::vector<char> resume_data;
 	bencode(back_inserter(resume_data), rd);
 
@@ -1046,7 +1055,7 @@ TORRENT_TEST(backwards_compatible_resume_info_dict)
 	session ses;
 	torrent_handle h = ses.add_torrent(atp);
 	auto torrent = h.torrent_file();
-	TEST_CHECK(torrent->info_hash() == ti->info_hash());
+	TEST_CHECK(torrent->info_hashes() == ti->info_hashes());
 	torrent_status s = h.status();
 }
 #endif
@@ -1070,9 +1079,17 @@ TORRENT_TEST(merkle_trees)
 	if (a == nullptr) return;
 
 	TEST_EQUAL(a->params.merkle_trees.size(), 3);
-	TEST_EQUAL(p.ti->merkle_trees().size(), 3);
+	TEST_EQUAL(a->params.merkle_tree_mask.size(), 3);
+	TEST_EQUAL(p.ti->internal_merkle_trees().size(), 3);
 	for (file_index_t const i : p.ti->files().file_range())
-		TEST_CHECK(a->params.merkle_trees[i] == p.ti->merkle_trees()[i]);
+	{
+		// use stuctured binding in C++17
+		std::vector<bool> mask;
+		std::vector<sha256_hash> sparse_tree;
+		std::tie(sparse_tree, mask) = p.ti->internal_merkle_trees()[i].build_sparse_vector();
+		TEST_CHECK(a->params.merkle_trees[i] == sparse_tree);
+		TEST_CHECK(a->params.merkle_tree_mask[i] == mask);
+	}
 }
 
 TORRENT_TEST(resume_info_dict)
@@ -1084,15 +1101,14 @@ TORRENT_TEST(resume_info_dict)
 	entry rd;
 	rd["file-format"] = "libtorrent resume file";
 	rd["name"] = ti->name();
-	rd["info-hash"] = ti->info_hash().v1;
-	auto metainfo = ti->metadata();
-	rd["info"] = bdecode({metainfo.get(), ti->metadata_size()});
+	rd["info-hash"] = ti->info_hashes().v1;
+	rd["info"] = bdecode(ti->info_section());
 	std::vector<char> resume_data;
 	bencode(back_inserter(resume_data), rd);
 
 	error_code ec;
 	add_torrent_params atp = read_resume_data(resume_data, ec);
-	TEST_CHECK(atp.ti->info_hash() == ti->info_hash());
+	TEST_CHECK(atp.ti->info_hashes() == ti->info_hashes());
 }
 
 TORRENT_TEST(zero_file_prio)
@@ -1115,6 +1131,9 @@ namespace test_mode {
 #if TORRENT_ABI_VERSION == 1
 	constexpr test_mode_t deprecated = 4_bit;
 #endif
+	constexpr test_mode_t missing_files = 5_bit;
+	constexpr test_mode_t pieces_have_all = 6_bit;
+	constexpr test_mode_t missing_all_files = 7_bit;
 }
 
 namespace {
@@ -1127,11 +1146,23 @@ void test_seed_mode(test_mode_t const flags)
 	p.ti = ti;
 	p.save_path = ".";
 
+	if (flags & test_mode::missing_files)
+	{
+		TEST_CHECK(::remove(combine_path("test_resume", "tmp2").c_str()) == 0);
+	}
+
+	if (flags & test_mode::missing_all_files)
+	{
+		lt::error_code ec;
+		lt::remove_all("test_resume", ec);
+		TEST_CHECK(!ec);
+	}
+
 	entry rd;
 
 	rd["file-format"] = "libtorrent resume file";
 	rd["file-version"] = 1;
-	rd["info-hash"] = ti->info_hash().v1.to_string();
+	rd["info-hash"] = ti->info_hashes().v1.to_string();
 	rd["blocks per piece"] = std::max(1, ti->piece_length() / 0x4000);
 
 	if (flags & test_mode::file_prio)
@@ -1153,6 +1184,11 @@ void test_seed_mode(test_mode_t const flags)
 		std::string pieces(std::size_t(ti->num_pieces()), '\x01');
 		pieces[0] = '\0';
 		rd["pieces"] = pieces;
+	}
+
+	if (flags & test_mode::pieces_have_all)
+	{
+		rd["pieces"] = std::string(std::size_t(ti->num_pieces()), '\x01');
 	}
 
 	if (flags & test_mode::piece_prio)
@@ -1186,6 +1222,8 @@ void test_seed_mode(test_mode_t const flags)
 
 	if (flags & (test_mode::file_prio
 		| test_mode::piece_prio
+		| test_mode::missing_files
+		| test_mode::missing_all_files
 		| test_mode::pieces_have))
 	{
 		std::vector<alert*> alerts;
@@ -1203,6 +1241,11 @@ void test_seed_mode(test_mode_t const flags)
 					TEST_CHECK(sca->state != torrent_status::seeding);
 					if (sca->state == torrent_status::downloading) done = true;
 				}
+				else if (alert_cast<torrent_finished_alert>(a))
+				{
+					// the torrent is not finished!
+					TEST_CHECK(false);
+				}
 			}
 			if (lt::clock_type::now() - start_time > seconds(5)) break;
 		}
@@ -1214,8 +1257,9 @@ void test_seed_mode(test_mode_t const flags)
 	{
 		std::vector<alert*> alerts;
 		bool done = false;
+		bool finished = false;
 		auto const start_time = lt::clock_type::now();
-		while (!done)
+		while (!done || !finished)
 		{
 			ses.wait_for_alert(seconds(1));
 			ses.pop_alerts(&alerts);
@@ -1227,10 +1271,15 @@ void test_seed_mode(test_mode_t const flags)
 					TEST_CHECK(sca->state != torrent_status::checking_files);
 					if (sca->state == torrent_status::seeding) done = true;
 				}
+				else if (alert_cast<torrent_finished_alert>(a))
+				{
+					finished = true;
+				}
 			}
 			if (lt::clock_type::now() - start_time > seconds(5)) break;
 		}
 		TEST_CHECK(done);
+		TEST_CHECK(finished);
 		torrent_status const s = h.status();
 		TEST_CHECK(s.flags & torrent_flags::seed_mode);
 	}
@@ -1258,6 +1307,26 @@ TORRENT_TEST(seed_mode_preserve_deprecated)
 {
 	test_seed_mode(test_mode::deprecated);
 }
+
+TORRENT_TEST(seed_mode_missing_files_deprecated)
+{
+	test_seed_mode(test_mode::missing_files | test_mode::deprecated);
+}
+
+TORRENT_TEST(seed_mode_missing_all_files_deprecated)
+{
+	test_seed_mode(test_mode::missing_all_files | test_mode::deprecated);
+}
+
+TORRENT_TEST(seed_mode_missing_files_with_pieces_deprecated)
+{
+	test_seed_mode(test_mode::missing_files | test_mode::pieces_have | test_mode::deprecated);
+}
+
+TORRENT_TEST(seed_mode_missing_files_with_all_pieces_deprecated)
+{
+	test_seed_mode(test_mode::missing_files | test_mode::pieces_have_all | test_mode::deprecated);
+}
 #endif
 
 TORRENT_TEST(seed_mode_file_prio)
@@ -1278,6 +1347,26 @@ TORRENT_TEST(seed_mode_piece_have)
 TORRENT_TEST(seed_mode_preserve)
 {
 	test_seed_mode(test_mode_t{});
+}
+
+TORRENT_TEST(seed_mode_missing_files)
+{
+	test_seed_mode(test_mode::missing_files);
+}
+
+TORRENT_TEST(seed_mode_missing_all_files)
+{
+	test_seed_mode(test_mode::missing_all_files);
+}
+
+TORRENT_TEST(seed_mode_missing_files_with_pieces)
+{
+	test_seed_mode(test_mode::missing_files | test_mode::pieces_have);
+}
+
+TORRENT_TEST(seed_mode_missing_files_with_all_pieces)
+{
+	test_seed_mode(test_mode::missing_files | test_mode::pieces_have_all);
 }
 
 TORRENT_TEST(seed_mode_load_peers)
@@ -1420,11 +1509,6 @@ TORRENT_TEST(seed_mode)
 	torrent_status s = test_resume_flags(ses
 		, torrent_flags::seed_mode).status();
 	default_tests(s);
-#ifdef TORRENT_WINDOWS
-	TEST_EQUAL(s.save_path, "c:\\add_torrent_params save_path");
-#else
-	TEST_EQUAL(s.save_path, "/add_torrent_params save_path");
-#endif
 	TEST_EQUAL(s.flags & flags_mask, torrent_flags::seed_mode);
 	TEST_EQUAL(s.connections_limit, 1345);
 	TEST_EQUAL(s.uploads_limit, 1346);
@@ -1445,6 +1529,7 @@ TORRENT_TEST(upload_mode)
 	TEST_EQUAL(s.uploads_limit, 1346);
 }
 
+#ifndef TORRENT_DISABLE_SHARE_MODE
 TORRENT_TEST(share_mode)
 {
 	lt::session ses(settings());
@@ -1460,6 +1545,7 @@ TORRENT_TEST(share_mode)
 	TEST_EQUAL(s.connections_limit, 1345);
 	TEST_EQUAL(s.uploads_limit, 1346);
 }
+#endif
 
 TORRENT_TEST(auto_managed)
 {
@@ -1472,7 +1558,9 @@ TORRENT_TEST(auto_managed)
 #else
 	TEST_EQUAL(s.save_path, "/add_torrent_params save_path");
 #endif
-	TEST_EQUAL(s.flags & flags_mask, torrent_flags::auto_managed);
+	// auto managed torrents may have been paused by the time we get here, so
+	// filter out that flag
+	TEST_EQUAL((s.flags & flags_mask) & ~torrent_flags::paused, torrent_flags::auto_managed);
 	TEST_EQUAL(s.connections_limit, 1345);
 	TEST_EQUAL(s.uploads_limit, 1346);
 }

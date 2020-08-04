@@ -45,6 +45,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/debug.hpp"
 #include "libtorrent/aux_/portmap.hpp"
 #include "libtorrent/aux_/vector.hpp"
+#include "libtorrent/enum_net.hpp" // for ip_interface
+#include "libtorrent/aux_/listen_socket_handle.hpp"
 
 namespace libtorrent {
 
@@ -71,7 +73,7 @@ namespace errors {
 	boost::system::error_code make_error_code(pcp_errors e);
 } // namespace errors
 
-	boost::system::error_category& pcp_category();
+	TORRENT_EXPORT boost::system::error_category& pcp_category();
 } // namespace libtorrent
 
 namespace boost {
@@ -87,9 +89,9 @@ struct TORRENT_EXTRA_EXPORT natpmp final
 	: std::enable_shared_from_this<natpmp>
 	, single_threaded
 {
-	natpmp(io_context& ios, aux::portmap_callback& cb);
+	natpmp(io_context& ios, aux::portmap_callback& cb, aux::listen_socket_handle ls);
 
-	void start(address local_address, std::string device);
+	void start(ip_interface const& ip);
 
 	// maps the ports, if a port is set to 0
 	// it will not be mapped
@@ -204,6 +206,8 @@ private:
 	port_mapping_t m_next_refresh{-1};
 
 	io_context& m_ioc;
+
+	aux::listen_socket_handle m_listen_handle;
 
 	bool m_disabled = false;
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
 
@@ -14,6 +14,11 @@ import subprocess as sub
 import sys
 import pickle
 import threading
+import tempfile
+import socket
+import select
+
+import dummy_data
 
 # include terminal interface for travis parallel executions of scripts which use
 # terminal features: fix multiple stdin assignment at termios.tcgetattr
@@ -53,6 +58,8 @@ class test_create_torrent(unittest.TestCase):
         ct.add_tracker('bar')
         ct.set_root_cert('1234567890')
         ct.add_collection('1337')
+        for i in range(ct.num_pieces()):
+            ct.set_hash(i, b'abababababababababab')
         entry = ct.generate()
         print(entry)
 
@@ -86,6 +93,12 @@ class test_torrent_handle(unittest.TestCase):
         self.h = self.ses.add_torrent({
             'ti': self.ti, 'save_path': os.getcwd(),
             'flags': lt.torrent_flags.default_flags})
+
+    def test_add_torrent_error(self):
+        self.ses = lt.session(settings)
+        self.ti = lt.torrent_info('url_seed_multi.torrent')
+        with self.assertRaises(RuntimeError):
+            self.ses.add_torrent({'ti': self.ti, 'save_path': os.getcwd(), 'info_hash': b'abababababababababab'})
 
     def test_torrent_handle(self):
         self.setup()
@@ -169,10 +182,16 @@ class test_torrent_handle(unittest.TestCase):
         # wait a bit until the endpoints list gets populated
         while len(self.h.trackers()[0]['endpoints']) == 0:
             time.sleep(0.1)
-        pickled_trackers = pickle.dumps(self.h.trackers())
+
+        trackers = self.h.trackers()
+        self.assertEqual(trackers[0]['url'], 'udp://tracker1.com')
+        # this is not necessarily 0, it could also be (EHOSTUNREACH) if the
+        # local machine doesn't support the address family
+        expect_value = trackers[0]['endpoints'][0]['info_hashes'][0]['last_error']['value']
+        pickled_trackers = pickle.dumps(trackers)
         unpickled_trackers = pickle.loads(pickled_trackers)
         self.assertEqual(unpickled_trackers[0]['url'], 'udp://tracker1.com')
-        self.assertEqual(unpickled_trackers[0]['endpoints'][0]['info_hashes'][0]['last_error']['value'], 0)
+        self.assertEqual(unpickled_trackers[0]['endpoints'][0]['info_hashes'][0]['last_error']['value'], expect_value)
 
     def test_file_status(self):
         self.setup()
@@ -295,6 +314,47 @@ class test_torrent_handle(unittest.TestCase):
         self.assertEqual(self.st.verified_pieces, [])
 
 
+class TestAddPiece(unittest.TestCase):
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.session = lt.session(settings)
+        self.ti = lt.torrent_info(dummy_data.DICT)
+        self.atp = lt.add_torrent_params()
+        self.atp.ti = self.ti
+        self.atp.save_path = self.dir.name
+        self.handle = self.session.add_torrent(self.atp)
+        self.wait_for(lambda: self.handle.status().state != lt.torrent_status.checking_files
+                      and self.handle.status().state != lt.torrent_status.checking_resume_data, msg="checking")
+
+    def wait_for(self, condition, msg="condition", timeout=5):
+        deadline = time.time() + timeout
+        while not condition():
+            self.assertLess(time.time(), deadline, msg="%s timed out" % msg)
+            time.sleep(0.1)
+
+    def wait_until_torrent_finished(self):
+        self.wait_for(lambda: self.handle.status().progress == 1.0, msg="progress")
+
+        def file_written():
+            with open(os.path.join(self.dir.name.encode(), dummy_data.NAME), mode="rb") as f:
+                return f.read() == dummy_data.DATA
+
+        self.wait_for(file_written, msg="file write")
+
+    def test_with_str(self):
+        for i, data in enumerate(dummy_data.PIECES):
+            self.handle.add_piece(i, data.decode(), 0)
+
+        self.wait_until_torrent_finished()
+
+    def test_with_bytes(self):
+        for i, data in enumerate(dummy_data.PIECES):
+            self.handle.add_piece(i, data, 0)
+
+        self.wait_until_torrent_finished()
+
+
 class test_torrent_info(unittest.TestCase):
 
     def test_bencoded_constructor(self):
@@ -316,12 +376,43 @@ class test_torrent_info(unittest.TestCase):
         if not HAVE_DEPRECATED_APIS:
             return
         info = lt.torrent_info(lt.sha1_hash('aaaaaaaaaaaaaaaaaaaa'))
-        self.assertEqual(info.info_hash().v1, lt.sha1_hash('aaaaaaaaaaaaaaaaaaaa'))
+        self.assertEqual(info.info_hash(), lt.sha1_hash('aaaaaaaaaaaaaaaaaaaa'))
+        self.assertEqual(info.info_hashes().v1, lt.sha1_hash('aaaaaaaaaaaaaaaaaaaa'))
+
+    def test_load_decode_depth_limit(self):
+        self.assertRaises(RuntimeError, lambda: lt.torrent_info(
+            {'test': {'test': {'test': {'test': {'test': {}}}}}, 'info': {
+                'name': 'test_torrent', 'length': 1234,
+                'piece length': 16 * 1024,
+                'pieces': 'aaaaaaaaaaaaaaaaaaaa'}}, {'max_decode_depth': 1}))
+
+    def test_load_max_pieces_limit(self):
+        self.assertRaises(RuntimeError, lambda: lt.torrent_info(
+            {'info': {
+                'name': 'test_torrent', 'length': 1234000,
+                'piece length': 16 * 1024,
+                'pieces': 'aaaaaaaaaaaaaaaaaaaa'}}, {'max_pieces': 1}))
+
+    def test_load_max_buffer_size_limit(self):
+        self.assertRaises(RuntimeError, lambda: lt.torrent_info(
+            {'info': {
+                'name': 'test_torrent', 'length': 1234000,
+                'piece length': 16 * 1024,
+                'pieces': 'aaaaaaaaaaaaaaaaaaaa'}}, {'max_buffer_size': 1}))
 
     def test_metadata(self):
+        if not HAVE_DEPRECATED_APIS:
+            return
+
         ti = lt.torrent_info('base.torrent')
 
         self.assertTrue(len(ti.metadata()) != 0)
+        self.assertTrue(len(ti.hash_for_piece(0)) != 0)
+
+    def test_info_section(self):
+        ti = lt.torrent_info('base.torrent')
+
+        self.assertTrue(len(ti.info_section()) != 0)
         self.assertTrue(len(ti.hash_for_piece(0)) != 0)
 
     def test_web_seeds(self):
@@ -406,6 +497,22 @@ class test_alerts(unittest.TestCase):
         print(st.last_download)
         self.assertEqual(st.save_path, os.getcwd())
 
+    def test_alert_fs(self):
+        ses = lt.session(settings)
+        s1, s2 = socket.socketpair()
+        ses.set_alert_fd(s2.fileno())
+
+        ses.pop_alerts()
+
+        # make sure there's an alert to wake us up
+        ses.post_session_stats()
+
+        read_sockets, write_sockets, error_sockets = select.select([s1], [], [])
+
+        self.assertEqual(len(read_sockets), 1)
+        for s in read_sockets:
+            s.recv(10)
+
     def test_pop_alerts(self):
         ses = lt.session(settings)
         ses.async_add_torrent(
@@ -471,7 +578,8 @@ class test_magnet_link(unittest.TestCase):
         self.assertEqual(str(p.info_hash.v1), '178882f042c0c33426a6d81e0333ece346e68a68')
         p.save_path = '.'
         h = ses.add_torrent(p)
-        self.assertEqual(str(h.info_hash().v1), '178882f042c0c33426a6d81e0333ece346e68a68')
+        self.assertEqual(str(h.info_hash()), '178882f042c0c33426a6d81e0333ece346e68a68')
+        self.assertEqual(str(h.info_hashes().v1), '178882f042c0c33426a6d81e0333ece346e68a68')
 
     def test_parse_magnet_uri_dict(self):
         ses = lt.session({})
@@ -480,7 +588,8 @@ class test_magnet_link(unittest.TestCase):
         self.assertEqual(binascii.hexlify(p['info_hash']), b'178882f042c0c33426a6d81e0333ece346e68a68')
         p['save_path'] = '.'
         h = ses.add_torrent(p)
-        self.assertEqual(str(h.info_hash().v1), '178882f042c0c33426a6d81e0333ece346e68a68')
+        self.assertEqual(str(h.info_hash()), '178882f042c0c33426a6d81e0333ece346e68a68')
+        self.assertEqual(str(h.info_hashes().v1), '178882f042c0c33426a6d81e0333ece346e68a68')
 
 
 class test_peer_class(unittest.TestCase):
@@ -557,8 +666,7 @@ class test_session(unittest.TestCase):
         self.assertEqual(s.get_settings()['user_agent'], 'test123')
 
     def test_post_session_stats(self):
-        s = lt.session({'alert_mask': lt.alert.category_t.stats_notification,
-                        'enable_dht': False})
+        s = lt.session({'alert_mask': 0, 'enable_dht': False})
         s.post_session_stats()
         alerts = []
         # first the stats headers log line. but not if logging is disabled
@@ -583,7 +691,7 @@ class test_session(unittest.TestCase):
         self.assertTrue(len(a.values) > 0)
 
     def test_post_dht_stats(self):
-        s = lt.session({'alert_mask': lt.alert.category_t.stats_notification, 'enable_dht': False})
+        s = lt.session({'alert_mask': 0, 'enable_dht': False})
         s.post_dht_stats()
         alerts = []
         cnt = 0
@@ -705,6 +813,7 @@ class test_example_client(unittest.TestCase):
     def test_default_settings(self):
 
         default = lt.default_settings()
+        self.assertNotIn('', default)
         print(default)
 
 

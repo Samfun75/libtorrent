@@ -51,7 +51,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <cstring> // for memcpy
 
 #include "libtorrent/natpmp.hpp"
-#include "libtorrent/io.hpp"
+#include "libtorrent/aux_/io_bytes.hpp"
 #include "libtorrent/assert.hpp"
 #include "libtorrent/enum_net.hpp"
 #include "libtorrent/socket_io.hpp"
@@ -59,7 +59,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/time.hpp"
 #include "libtorrent/debug.hpp"
 #include "libtorrent/random.hpp"
-#include "libtorrent/broadcast_socket.hpp" // for is_local
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_local
 #include "libtorrent/aux_/escape_string.hpp"
 #include "libtorrent/aux_/numeric_cast.hpp"
 
@@ -137,12 +137,14 @@ using namespace aux;
 using namespace std::placeholders;
 
 natpmp::natpmp(io_context& ios
-	, aux::portmap_callback& cb)
+	, aux::portmap_callback& cb
+	, listen_socket_handle ls)
 	: m_callback(cb)
 	, m_socket(ios)
 	, m_send_timer(ios)
 	, m_refresh_timer(ios)
 	, m_ioc(ios)
+	, m_listen_handle(std::move(ls))
 {
 	// unfortunately async operations rely on the storage
 	// for this array not to be reallocated, by passing
@@ -150,100 +152,55 @@ natpmp::natpmp(io_context& ios
 	m_mappings.reserve(10);
 }
 
-void natpmp::start(address local_address, std::string device)
+void natpmp::start(ip_interface const& ip)
 {
 	TORRENT_ASSERT(is_single_thread());
-
-	error_code ec;
 
 	// assume servers support PCP and fall back to NAT-PMP
 	// if necessary
 	m_version = version_pcp;
 
-	// we really want a device name to get the right default gateway
-	// try to find one even if the listen socket isn't bound to a device
-	if (device.empty())
+	address const& local_address = ip.interface_address;
+
+	error_code ec;
+	auto const routes = enum_routes(m_ioc, ec);
+	if (ec)
 	{
-		device = device_for_address(local_address, m_ioc, ec);
-		// if this fails fall back to using the first default gateway in the
-		// routing table
-		ec.clear();
+#ifndef TORRENT_DISABLE_LOGGING
+		if (should_log())
+		{
+			log("failed to enumerate routes: %s"
+				, convert_from_native(ec.message()).c_str());
+		}
+#endif
+		disable(ec);
 	}
 
-	auto const route = get_default_route(m_ioc, device, local_address.is_v6(), ec);
+	auto const route = get_gateway(ip, routes);
 
 	if (!route)
 	{
 #ifndef TORRENT_DISABLE_LOGGING
 		if (should_log())
 		{
-			log("failed to find default route for \"%s\" %s: %s"
-				, device.c_str(), local_address.to_string().c_str()
-				, convert_from_native(ec.message()).c_str());
+			log("failed to find default route for \"%s\" %s"
+				, ip.name, local_address.to_string().c_str());
 		}
 #endif
 		disable(ec);
 		return;
 	}
 
-	if (device.empty()) device = route->name;
-
-	TORRENT_ASSERT(!device.empty());
-
-	// PCP requires reporting the source address at the application
-	// layer so the socket MUST be bound to a specific address
-	// if the caller didn't specify one then get the first suitable
-	// address from the OS
-	if (local_address.is_unspecified())
-	{
-		std::vector<ip_interface> const net = enum_net_interfaces(m_ioc, ec);
-
-		auto const it = std::find_if(net.begin(), net.end(), [&](ip_interface const& i)
-		{
-			return i.interface_address.is_v4() == local_address.is_v4()
-				&& (i.interface_address.is_v4() || !is_local(i.interface_address))
-				&& i.name == device;
-		});
-
-		if (it != net.end())
-		{
-			local_address = it->interface_address;
-		}
-		else
-		{
-			// if we can't get a specific address to bind to we'll have
-			// to fall back to NAT-PMP
-			// but NAT-PMP doesn't support IPv6 so if that's what is being
-			// requested we can't do anything
-			if (local_address.is_v6())
-			{
-				if (!ec) ec = boost::asio::error::address_family_not_supported;
-#ifndef TORRENT_DISABLE_LOGGING
-				if (should_log())
-				{
-					log("cannot map IPv6 without a local address, %s"
-						, convert_from_native(ec.message()).c_str());
-				}
-#endif
-				disable(ec);
-				return;
-			}
-
-			m_version = version_natpmp;
-			ec.clear();
-		}
-	}
-
 	m_disabled = false;
 
-	udp::endpoint const nat_endpoint(route->gateway, 5351);
+	udp::endpoint const nat_endpoint(*route, 5351);
 	if (nat_endpoint == m_nat_endpoint) return;
 	m_nat_endpoint = nat_endpoint;
 
 #ifndef TORRENT_DISABLE_LOGGING
 	if (should_log())
 	{
-		log("found router at: %s"
+		log("found gateway at: %s"
 			, print_address(m_nat_endpoint.address()).c_str());
 	}
 #endif
@@ -333,7 +290,9 @@ void natpmp::mapping_log(char const* op, mapping_t const& m) const
 			, m.external_port
 			, m.local_port
 			, to_string(m.act)
-			, total_seconds(m.expires - aux::time_now()));
+			, (m.expires.time_since_epoch() != seconds(0))
+				? total_seconds(m.expires - aux::time_now())
+				: std::int64_t(0));
 	}
 }
 
@@ -347,7 +306,7 @@ void natpmp::log(char const* fmt, ...) const
 	va_start(v, fmt);
 	std::vsnprintf(msg, sizeof(msg), fmt, v);
 	va_end(v);
-	m_callback.log_portmap(portmap_transport::natpmp, msg);
+	m_callback.log_portmap(portmap_transport::natpmp, msg, m_listen_handle);
 }
 #endif
 
@@ -363,7 +322,7 @@ void natpmp::disable(error_code const& ec)
 		i->protocol = portmap_protocol::none;
 		port_mapping_t const index(static_cast<int>(i - m_mappings.begin()));
 		m_callback.on_port_mapping(index, address(), 0, proto, ec
-			, portmap_transport::natpmp);
+			, portmap_transport::natpmp, m_listen_handle);
 	}
 	close_impl();
 }
@@ -510,7 +469,23 @@ void natpmp::send_map_request(port_mapping_t const i)
 		write_uint8(opcode_map, out);
 		write_uint16(0, out); // reserved
 		write_uint32(ttl, out);
-		address const local_addr = m_socket.local_endpoint().address();
+		error_code ec;
+		address const local_addr = m_socket.local_endpoint(ec).address();
+		if (ec)
+		{
+#ifndef TORRENT_DISABLE_LOGGING
+			if ( should_log())
+			{
+				log("*** port map, local_endpoint [ ec: %s:%d %s ]"
+					, ec.category().name()
+					, ec.value()
+					, ec.message().c_str());
+			}
+#endif
+			m_currently_mapping = port_mapping_t{-1};
+			m.act = portmap_action::none;
+			return;
+		}
 		auto const local_bytes = local_addr.is_v4()
 			? make_address_v6(v4_mapped, local_addr.to_v4()).to_bytes()
 			: local_addr.to_v6().to_bytes();
@@ -533,7 +508,7 @@ void natpmp::send_map_request(port_mapping_t const i)
 				? make_address_v6(v4_mapped, m.external_address.to_v4())
 				: m.external_address.to_v6();
 		}
-		else if (is_local(local_addr))
+		else if (aux::is_local(local_addr))
 		{
 			external_addr = local_addr.is_v4()
 				? make_address_v6(v4_mapped, address_v4())
@@ -568,8 +543,18 @@ void natpmp::send_map_request(port_mapping_t const i)
 
 	error_code ec;
 	m_socket.send_to(boost::asio::buffer(buf, std::size_t(out - buf)), m_nat_endpoint, 0, ec);
+#ifndef TORRENT_DISABLE_LOGGING
+	if (ec && should_log())
+	{
+		log("*** port map [ ec: %s:%d %s ]"
+			, ec.category().name()
+			, ec.value()
+			, ec.message().c_str());
+	}
+#endif
 	m.map_sent = true;
 	m.outstanding_request = true;
+
 	if (m_abort)
 	{
 		// when we're shutting down, ignore the
@@ -701,7 +686,9 @@ void natpmp::on_reply(error_code const& e
 #ifndef TORRENT_DISABLE_LOGGING
 		log("unsupported version");
 #endif
-		if (m_version == version_pcp && !is_v6(m_socket.local_endpoint()))
+		// ignore errors from local_endpoint
+		error_code ec;
+		if (m_version == version_pcp && !aux::is_v6(m_socket.local_endpoint(ec)))
 		{
 			m_version = version_natpmp;
 			resend_request(m_currently_mapping);
@@ -827,7 +814,7 @@ void natpmp::on_reply(error_code const& e
 	}
 	else
 	{
-		m->expires = aux::time_now() + seconds(int(lifetime * 0.7f));
+		m->expires = aux::time_now() + seconds(lifetime * 3 / 4);
 		m->external_port = public_port;
 		if (!external_addr.is_unspecified())
 			m->external_address = external_addr;
@@ -838,14 +825,14 @@ void natpmp::on_reply(error_code const& e
 		m->expires = aux::time_now() + hours(2);
 		portmap_protocol const proto = m->protocol;
 		m_callback.on_port_mapping(port_mapping_t{index}, address(), 0, proto
-			, from_result_code(version, result), portmap_transport::natpmp);
+			, from_result_code(version, result), portmap_transport::natpmp, m_listen_handle);
 	}
 	else if (m->act == portmap_action::add)
 	{
 		portmap_protocol const proto = m->protocol;
 		address const ext_ip = version == version_pcp ? m->external_address : m_external_ip;
 		m_callback.on_port_mapping(port_mapping_t{index}, ext_ip, m->external_port, proto
-			, errors::pcp_success, portmap_transport::natpmp);
+			, errors::pcp_success, portmap_transport::natpmp, m_listen_handle);
 	}
 
 	m_currently_mapping = port_mapping_t{-1};
@@ -906,7 +893,7 @@ void natpmp::mapping_expired(error_code const& e, port_mapping_t const i)
 {
 	TORRENT_ASSERT(is_single_thread());
 	COMPLETE_ASYNC("natpmp::mapping_expired");
-	if (e) return;
+	if (e || m_abort) return;
 #ifndef TORRENT_DISABLE_LOGGING
 	log("mapping %u expired", static_cast<int>(i));
 #endif

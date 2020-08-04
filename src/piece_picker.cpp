@@ -55,11 +55,11 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #if TORRENT_USE_ASSERTS
 #include "libtorrent/peer_connection.hpp"
-#include "libtorrent/torrent.hpp"
+#include "libtorrent/aux_/torrent.hpp"
 #include "libtorrent/torrent_peer.hpp"
 #endif
 
-#include "libtorrent/invariant_check.hpp"
+#include "libtorrent/aux_/invariant_check.hpp"
 
 // this is really only useful for debugging unit tests
 //#define TORRENT_PICKER_LOG
@@ -113,26 +113,6 @@ namespace libtorrent {
 	const piece_block piece_block::invalid(
 		std::numeric_limits<piece_index_t>::max()
 		, std::numeric_limits<int>::max());
-
-	constexpr prio_index_t piece_picker::piece_pos::we_have_index;
-
-	constexpr picker_options_t piece_picker::rarest_first;
-	constexpr picker_options_t piece_picker::reverse;
-	constexpr picker_options_t piece_picker::on_parole;
-	constexpr picker_options_t piece_picker::prioritize_partials;
-	constexpr picker_options_t piece_picker::sequential;
-	constexpr picker_options_t piece_picker::time_critical_mode;
-	constexpr picker_options_t piece_picker::align_expanded_pieces;
-	constexpr picker_options_t piece_picker::piece_extent_affinity;
-
-	constexpr download_queue_t piece_picker::piece_pos::piece_downloading;
-	constexpr download_queue_t piece_picker::piece_pos::piece_full;
-	constexpr download_queue_t piece_picker::piece_pos::piece_finished;
-	constexpr download_queue_t piece_picker::piece_pos::piece_zero_prio;
-	constexpr download_queue_t piece_picker::piece_pos::num_download_categories;
-	constexpr download_queue_t piece_picker::piece_pos::piece_open;
-	constexpr download_queue_t piece_picker::piece_pos::piece_downloading_reverse;
-	constexpr download_queue_t piece_picker::piece_pos::piece_full_reverse;
 
 	// the max number of blocks to create an affinity for
 	constexpr int max_piece_affinity_extent = 4 * 1024 * 1024 / default_block_size;
@@ -452,7 +432,7 @@ namespace libtorrent {
 #endif
 	}
 
-	void piece_picker::check_invariant(torrent const* t) const
+	void piece_picker::check_invariant(aux::torrent const* t) const
 	{
 		TORRENT_ASSERT(m_num_have >= 0);
 		TORRENT_ASSERT(m_num_have_filtered >= 0);
@@ -1318,7 +1298,7 @@ namespace libtorrent {
 			// and mark the picker as dirty, so we'll rebuild it next time we need it.
 			// this only matters if we're not already dirty, in which case the fasted
 			// thing to do is to just update the counters and be done
-			piece_index_t index = piece_index_t(0);
+			piece_index_t index{0};
 			int num_inc = 0;
 			for (auto i = bitmask.begin(), end(bitmask.end()); i != end; ++i, ++index)
 			{
@@ -1354,7 +1334,7 @@ namespace libtorrent {
 			}
 		}
 
-		piece_index_t index = piece_index_t(0);
+		piece_index_t index{0};
 		bool updated = false;
 		for (auto i = bitmask.begin(), end(bitmask.end()); i != end; ++i, ++index)
 		{
@@ -1414,7 +1394,7 @@ namespace libtorrent {
 			// and mark the picker as dirty, so we'll rebuild it next time we need it.
 			// this only matters if we're not already dirty, in which case the fasted
 			// thing to do is to just update the counters and be done
-			piece_index_t index = piece_index_t(0);
+			piece_index_t index{0};
 			int num_dec = 0;
 			for (auto i = bitmask.begin(), end(bitmask.end()); i != end; ++i, ++index)
 			{
@@ -1459,7 +1439,7 @@ namespace libtorrent {
 			}
 		}
 
-		piece_index_t index = piece_index_t(0);
+		piece_index_t index{0};
 		bool updated = false;
 		for (auto i = bitmask.begin(), end(bitmask.end()); i != end; ++i, ++index)
 		{
@@ -1541,7 +1521,7 @@ namespace libtorrent {
 		// set up m_pieces to contain valid piece indices, based on piece
 		// priority. m_piece_map[].index is still just an index relative to the
 		// respective priority range.
-		piece_index_t piece = piece_index_t(0);
+		piece_index_t piece{0};
 		for (auto i = m_piece_map.begin(), end(m_piece_map.end()); i != end; ++i, ++piece)
 		{
 			piece_pos& p = *i;
@@ -1739,6 +1719,37 @@ namespace libtorrent {
 		if (m_dirty) return;
 		remove(priority, info_index);
 		TORRENT_ASSERT(p.priority(this) == -1);
+	}
+
+	void piece_picker::we_have_all()
+	{
+		INVARIANT_CHECK;
+#ifdef TORRENT_PICKER_LOG
+		std::cerr << "[" << this << "] " << "piece_picker::we_have_all()\n";
+#endif
+
+		m_priority_boundaries.clear();
+		m_priority_boundaries.resize(1, prio_index_t(0));
+		m_block_info.clear();
+		m_free_block_infos.clear();
+		m_pieces.clear();
+
+		m_dirty = false;
+		m_num_have_filtered += m_num_filtered;
+		m_num_filtered = 0;
+		m_have_filtered_pad_blocks += m_filtered_pad_blocks;
+		m_filtered_pad_blocks = 0;
+		m_cursor = m_piece_map.end_index();
+		m_reverse_cursor = piece_index_t{0};
+		m_num_passed = num_pieces();
+		m_num_have = num_pieces();
+
+		for (auto& queue : m_downloads) queue.clear();
+		for (auto& p : m_piece_map)
+		{
+			p.set_have();
+			p.state(piece_pos::piece_open);
+		}
 	}
 
 	bool piece_picker::set_piece_priority(piece_index_t const index
@@ -2005,7 +2016,7 @@ namespace {
 			// now, copy over the pointers. We also apply a filter here to not
 			// include ineligible pieces in certain modes. For instance, a piece
 			// that the current peer doesn't have is not included.
-			for (auto& dp : m_downloads[piece_pos::piece_downloading])
+			for (auto const& dp : m_downloads[piece_pos::piece_downloading])
 			{
 				pc.inc_stats_counter(counters::piece_picker_partial_loops);
 

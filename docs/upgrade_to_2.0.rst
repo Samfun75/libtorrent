@@ -5,7 +5,7 @@ Upgrading to libtorrent 2.0
 :Author: Arvid Norberg, arvid@libtorrent.org
 
 .. contents:: Table of contents
-  :depth: 1
+  :depth: 2
   :backlinks: none
 
 In libtorrent 2.0, some parts of the API has changed and some deprecated parts
@@ -42,6 +42,16 @@ info_hash_t.
 The alerts torrent_removed_alert, torrent_deleted_alert,
 torrent_delete_failed_alert all have ``info_hash`` members. They are no longer
 of the type sha1_hash, but info_hash_t.
+
+info_hash_t can be implicitly constructed from a sha1_hash, which means it can
+also be compared to a sha1_hash, via this conversion constructor. However, when
+adding support for v2 torrents to a client, this conversion may also be a source
+of stripping off the v2 hash. An info_hash_t object for a hybrid torrent will
+have both the v1 and v2 hashes set, it will compare false to a sha1_hash of
+*just* the v1 hash.
+
+Calls to torrent_handle::info_hash() may need to be replaced by
+torrent_handle::info_hashes(), in order to get both v1 and v2 hashes.
 
 announce_entry/tracker changes
 ------------------------------
@@ -155,6 +165,15 @@ constructor (see session_params). Instead of taking a `dht_settings` object, it
 is now passed the full `settings_pack`. This is considered a niche interface,
 so there is no backward compatibility option provided.
 
+stats_alert
+===========
+
+The stats_alert is deprecated. Instead, call session::post_torrent_updates().
+This will post a state_update_alert containing torrent_status of all torrents
+that have any updates since last time this function was called.
+
+The new mechanism scales a lot better.
+
 saving and restoring session state
 ==================================
 
@@ -181,6 +200,21 @@ A lot of session constructors have been deprecated in favor of the ones that tak
 a session_params object. The session_params object can be implicitly constructed
 from a settings_pack, to cover one of the now-deprecated constructors. However,
 to access this conversion `libtorrent/session_params.hpp` must be included.
+
+userdata is no longer a void\*
+==============================
+
+The ``userdata`` field in add_torrent_params is no longer a raw void pointer.
+Instead it is a type-safe client_data_t object. client_data_t is similar to
+``std::any``, it can hold a pointer of any type by assignment and can be cast
+back to that pointer via ``static_cast`` (explicit conversion). However, if the
+pointer type it is cast to is not identical to what was assigned, a ``nullptr``
+is returned. Note that the type has to be identical in CV-qualifiers as well.
+
+This userdata field affects the plugin APIs that has this field passed into it.
+
+Additionally, there's now a way to as a torrent_handle for the userdata, so it is
+associated with the torrent itself.
 
 Adding torrents by URL no longer supported
 ==========================================
@@ -251,6 +285,19 @@ in add_torrent_params. add_torrent_params no longer has a storage_constructor
 member.
 
 As a consequence of this, ``get_storage_impl()`` has been removed from torrent_handle.
+
+``aio_threads`` and ``hashing_threads``
+---------------------------------------
+
+In previous versions of libtorrent, the number of disk threads to use were
+configured by settings_pack::aio_threads. Every fourth thread was dedicated to
+run hash jobs, i.e. computing SHA-1 piece hashes to compare them against the
+expected hash.
+
+This setting has now been split up to allow controlling the number of dedicated
+hash threads independently from the number of generic disk I/O threads.
+settings_pack::hashing_threads is now used to control the number of threads
+dedicated to computing hashes.
 
 cache_size
 ----------

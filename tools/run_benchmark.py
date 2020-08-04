@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
 import os
@@ -7,8 +7,6 @@ import shutil
 import subprocess
 import sys
 import multiprocessing
-
-cache_size = 300  # in MiB
 
 toolset = ''
 if len(sys.argv) > 1:
@@ -78,8 +76,8 @@ def run_test(name, test_cmd, client_arg, num_peers):
     client_cmd = '../examples/client_test -k --listen_interfaces=127.0.0.1:%d cpu_benchmark.torrent ' \
         '--disable_hash_checks=1 --enable_dht=0 --enable_lsd=0 --enable_upnp=0 --enable_natpmp=0 ' \
         '-e 120 %s -O --allow_multiple_connections_per_ip=1 --connections_limit=%d -T %d ' \
-        '--cache_size=%d -f %s/events.log --alert_mask=8747' \
-        % (port, client_arg, num_peers * 2, num_peers * 2, cache_size * 16, output_dir)
+        '-f %s/events.log --alert_mask=8747' \
+        % (port, client_arg, num_peers * 2, num_peers * 2, output_dir)
     test_cmd = '../examples/connection_tester %s -c %d -d 127.0.0.1 -p %d -t cpu_benchmark.torrent' % (
         test_cmd, num_peers, port)
 
@@ -113,7 +111,7 @@ def run_test(name, test_cmd, client_arg, num_peers):
     except Exception:
         print('please install gprof2dot and dot:\nsudo pip install gprof2dot\nsudo apt install graphviz')
 
-    os.system('python parse_session_stats.py %s/events.log' % output_dir)
+    os.system('python3 parse_session_stats.py %s/events.log' % output_dir)
 
     try:
         shutil.move('session_stats_report', '%s/session_stats_report' % output_dir)

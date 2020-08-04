@@ -36,7 +36,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/upnp.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/socket_io.hpp" // print_endpoint
-#include "libtorrent/http_parser.hpp"
+#include "libtorrent/aux_/http_parser.hpp"
+#include "broadcast_socket.hpp"
 #include "test.hpp"
 #include "setup_transfer.hpp"
 #include "libtorrent/aux_/path.hpp"
@@ -76,7 +77,7 @@ char const* soap_delete_response[] = {
 
 void incoming_msearch(udp::endpoint const& from, span<char const> buffer)
 {
-	http_parser p;
+	aux::http_parser p;
 	bool error = false;
 	p.incoming(buffer, error);
 	if (error || !p.header_finished())
@@ -90,7 +91,7 @@ void incoming_msearch(udp::endpoint const& from, span<char const> buffer)
 
 	std::cout << "< incoming m-search from " << from << std::endl;
 
-	char msg[] = "HTTP/1.1 200 OK\r\n"
+	char const msg[] = "HTTP/1.1 200 OK\r\n"
 		"ST:upnp:rootdevice\r\n"
 		"USN:uuid:000f-66d6-7296000099dc::upnp:rootdevice\r\n"
 		"Location: http://127.0.0.1:%d/upnp.xml\r\n"
@@ -110,7 +111,9 @@ void incoming_msearch(udp::endpoint const& from, span<char const> buffer)
 #pragma clang diagnostic pop
 #endif
 	error_code ec;
-	sock->send(buf, len, ec);
+	sock->send_to(buf, len, from, ec);
+
+	std::cout << "> sending response to " << print_endpoint(from) << std::endl;
 
 	if (ec) std::cout << "*** error sending " << ec.message() << std::endl;
 }
@@ -126,14 +129,12 @@ struct callback_info
 
 std::list<callback_info> callbacks;
 
-namespace // TODO: remove this nested namespace
-{
 	struct upnp_callback final : aux::portmap_callback
 	{
 		void on_port_mapping(port_mapping_t const mapping
 			, address const& ip, int port
 			, portmap_protocol const protocol, error_code const& err
-			, portmap_transport) override
+			, portmap_transport, aux::listen_socket_handle const&) override
 		{
 			callback_info info = {mapping, port, err};
 			callbacks.push_back(info);
@@ -148,19 +149,58 @@ namespace // TODO: remove this nested namespace
 			return true;
 		}
 
-		void log_portmap(portmap_transport, char const* msg) const override
+		void log_portmap(portmap_transport, char const* msg
+			, aux::listen_socket_handle const&) const override
 		{
 			std::cout << "UPnP: " << msg << std::endl;
 			//TODO: store the log and verify that some key messages are there
 		}
 	#endif
 	};
+
+ip_interface pick_upnp_interface()
+{
+	lt::io_context ios;
+	error_code ec;
+	std::vector<ip_route> const routes = enum_routes(ios, ec);
+	if (ec)
+	{
+		std::cerr << "failed to enumerate routes: " << ec.message() << '\n';
+		TEST_CHECK(false);
+		return {};
+	}
+	std::vector<ip_interface> const ifs = enum_net_interfaces(ios, ec);
+	if (ec)
+	{
+		std::cerr << "failed to enumerate network interfaces: " << ec.message() << '\n';
+		TEST_CHECK(false);
+		return {};
+	}
+	int idx = 0;
+	auto const iface = std::find_if(ifs.begin(), ifs.end(), [&](ip_interface const& face)
+		{
+			std::cerr << " - " << idx << ' ' << face.interface_address.to_string() << ' ' << face.name << '\n';
+			++idx;
+			if (!face.interface_address.is_v4()) return false;
+			if (face.interface_address.is_loopback()) return false;
+			auto const route = std::find_if(routes.begin(), routes.end(), [&](ip_route const& r)
+				{ return r.destination.is_unspecified() && string_view(face.name) == r.name; });
+			if (route == routes.end()) return false;
+			return true;
+		});
+
+	if (iface == ifs.end())
+	{
+		std::cerr << "could not find an IPv4 interface to run UPnP test over!\n";
+		TEST_CHECK(false);
+		return {};
+	}
+	std::cout << "starting upnp on: " << iface->interface_address.to_string() << ' ' << iface->name << '\n';
+	return *iface;
 }
 
 void run_upnp_test(char const* root_filename, char const* control_name, int igd_version)
 {
-	lt::io_context ios;
-
 	g_port = start_web_server();
 
 	std::vector<char> buf;
@@ -191,14 +231,19 @@ void run_upnp_test(char const* root_filename, char const* control_name, int igd_
 
 	sock = new broadcast_socket(uep("239.255.255.250", 1900));
 
+	lt::io_context ios;
+
 	sock->open(&incoming_msearch, ios, ec);
 
-	std::string user_agent = "test agent";
+	aux::session_settings sett;
+
+	// pick an appropriate interface to run this test on
+	auto const ipf = pick_upnp_interface();
 
 	upnp_callback cb;
-	auto upnp_handler = std::make_shared<upnp>(ios, user_agent, cb, false);
+	auto upnp_handler = std::make_shared<upnp>(ios, sett, cb
+		, ipf.interface_address.to_v4(), ipf.netmask.to_v4(), ipf.name, aux::listen_socket_handle());
 	upnp_handler->start();
-	upnp_handler->discover_device();
 
 	for (int i = 0; i < 20; ++i)
 	{
@@ -264,8 +309,14 @@ TORRENT_TEST(upnp)
 TORRENT_TEST(upnp_max_mappings)
 {
 	lt::io_context ios;
+
+	// pick an appropriate interface to run this test on
+	auto const ipf = pick_upnp_interface();
+	aux::session_settings sett;
+
 	upnp_callback cb;
-	auto upnp_handler = std::make_shared<upnp>(ios, "test agent", cb, false);
+	auto upnp_handler = std::make_shared<upnp>(ios, sett, cb
+		, ipf.interface_address.to_v4(), ipf.netmask.to_v4(), ipf.name, aux::listen_socket_handle());
 
 	for (int i = 0; i < 50; ++i)
 	{

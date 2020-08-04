@@ -1,51 +1,64 @@
 language: cpp
-dist: xenial
+dist: bionic
 
 matrix:
   fast_finish: true
   include:
     - if: repo = arvidn/libtorrent
-      env: variant=release sonar_scan=1 toolset=gcc check_headers=1
-    - env: variant=test_debug crypto=openssl tests=1 examples=1 tools=1 toolset=darwin
+      env: variant=release sonar_scan=1 toolset=gcc
+    - env: variant=release toolset=gcc check_headers=1 python=1
+    - env: variant=debug crypto=openssl tests=1 examples=1 tools=1 toolset=darwin
       os: osx
       osx_image: xcode11.2
-    - env: variant=test_debug crypto=openssl docs=1 python=1 toolset=darwin ios=1
+    - env: variant=debug crypto=openssl webtorrent=on python=1 toolset=darwin ios=1
       os: osx
       osx_image: xcode11.2
-    - env: variant=debug toolset=gcc lint=1 pylint=1 clang_tidy=1
+    - env: variant=debug toolset=gcc pylint=1 clang_tidy=1
       addons:
         apt:
-          sources:
-          - ubuntu-toolchain-r-test
           packages:
           - python3-pip
-          - g++-6
-    - env: variant=test_debug tests=1 toolset=gcc sanitizer=on fuzzers=1
-    - env: variant=test_debug tests=1 mmap=off toolset=gcc
-    - env: variant=test_debug sim=1 crypto=openssl toolset=gcc sanitizer=on
-#    - env: variant=test_debug tests=1 crypto=wolfssl toolset=gcc sanitizer=on
-    - env: variant=test_release coverage=1 tests=1 toolset=gcc-coverage python=1 python_dist=1
-    - env: dist=1 toolset=gcc install_boost=1
+          - clang-tidy-9
+    - env: variant=debug tests=1 toolset=gcc sanitizer=on fuzzers=1
+    - env: variant=debug tests=1 mmap=off toolset=gcc
+    - env: variant=debug sim=1 crypto=openssl toolset=gcc sanitizer=on cbinding=1
+    - env: variant=debug tests=1 crypto=gnutls webtorrent=on toolset=gcc sanitizer=on
       addons:
         apt:
-          sources:
-          - ubuntu-toolchain-r-test
+          packages:
+          - gnutls-dev
+          - nettle-dev
+          - python3-websockets
+#    - env: variant=debug tests=1 crypto=wolfssl toolset=gcc sanitizer=on
+    - env: variant=release coverage=1 tests=1 toolset=gcc-coverage python=1 python_dist=1
+    - env: dist=1 toolset=gcc install_boost=1 docs=1
+      addons:
+        apt:
           packages:
           - python-docutils
           - python-pygments
           - python-pil
           - python-aafigure
+          - icoutils
           - graphviz
-          - g++-6
+          - hunspell
+          - imagemagick
     - env: cmake=1 toolset=gcc install_boost=1
       addons:
         apt:
-          sources:
-          - ubuntu-toolchain-r-test
           packages:
           - ninja-build
-          - g++-6
     - env: arch=arm toolset=gcc-arm
+      addons:
+        apt:
+          packages:
+          - qemu-user-static
+    - env: arch=s390x toolset=gcc-s390x
+      addons:
+        apt:
+          packages:
+          - g++-8-s390x-linux-gnu
+          - qemu-user-static
 
 notifications:
   email: false
@@ -57,22 +70,21 @@ git:
 branches:
   only:
     - master
+    - RC_2_0
     - RC_1_2
     - RC_1_1
 
 cache:
   directories:
     - $HOME/.ccache
+    - $HOME/boost
 
 # sources  list: https://github.com/travis-ci/apt-source-whitelist/blob/master/ubuntu.json,
 # packages list: https://github.com/travis-ci/apt-package-whitelist/blob/master/ubuntu-precise
 addons:
   apt:
-    sources:
-    - ubuntu-toolchain-r-test
     packages:
-    - python2.7-dev
-    - g++-6
+    - python3.7-dev
 
 before_install:
 
@@ -80,47 +92,49 @@ before_install:
       export sonar_scan=0;
     fi'
 
-  # on linux, pull down a recent version of boost and build boost-build
-  - 'if [[ $TRAVIS_OS_NAME == "linux" ]]; then
-    cd ..;
-    wget --quiet https://dl.bintray.com/boostorg/release/1.71.0/source/boost_1_71_0.zip;
-    unzip -qq boost_1_71_0.zip;
-    export BOOST_ROOT=$PWD/boost_1_71_0;
-    cd boost_1_71_0/;
-    ./bootstrap.sh;
-    export PATH=$BOOST_ROOT/tools/build/src/engine/:$PATH;
-    export PATH=$BOOST_ROOT:$PATH;
+  # pull down a recent version of boost and build boost-build
+  - cd $HOME;
+  - 'if [[ ! -d boost/.git ]]; then
+      git clone --depth=1 --branch=boost-1.72.0 https://github.com/boostorg/boost.git;
     fi'
+  - export BOOST_ROOT=$PWD/boost
+  - echo ${BOOST_ROOT}
+  - cd boost
+  - git submodule update --init --depth=1
+  - ./bootstrap.sh
+  - ./b2 headers
+  - export PATH=$BOOST_ROOT:$PATH
 
   - cd $TRAVIS_BUILD_DIR;
-  - git submodule update --init --recursive
+  - git submodule update --depth=1 --init --recursive
   - 'if [[ $crypto == "" ]]; then export crypto=built-in; fi'
   - 'if [[ $sanitizer == "" ]]; then export sanitizer=off; fi'
   - 'if [[ $mmap == "" ]]; then export mmap=on; fi'
-  - 'if [[ $TRAVIS_OS_NAME == "osx" && ( "$tests" == "1" || "$sim" == 1 || "$examples" == "1" || "$tools" == "1" || "$python" == "1" || "$check_headers" == "1" ) ]]; then
-    travis_retry brew update > /dev/null && brew install ccache boost-build;
-    fi'
-  - 'if [[ $TRAVIS_OS_NAME == "osx" && "$python" == "1" ]]; then
-      travis_retry brew install boost-python python2;
-      brew link --overwrite python@2;
-    fi'
   - 'if [[ $TRAVIS_OS_NAME != "osx" ]]; then
-      export B2=bjam;
+      export B2=b2;
+      export PIP=pip;
     else
       export B2=b2;
+      export PIP="python -m pip";
       sysctl hw.ncpu;
+    fi'
+  - 'if [[ $TRAVIS_OS_NAME == "osx" ]]; then
+      travis_retry brew install ccache;
     fi'
   # we have to use python from brew rather than the system provided python
   # because of OSX System Integrity Protection, which prevents injecting
   # user-libraries (i.e. python modules) into system binaries (i.e. /usr/bin/python)
-  - 'if [ "$docs" = "1" ]; then
-    pip install docutils;
-    pip install Pygments;
-    travis_retry brew install graphviz hunspell;
+  # it's important to install the brew python version before any pip packages,
+  # as the pip packages may break if the version of python they used gets pulled
+  # from under them
+  - 'if [[ "$python" == "1" ]]; then
+       which python3;
+       which pip3;
+       python3 --version;
     fi'
 
   - if [ "$coverage" == "1" ]; then
-    pip install --user codecov;
+    ${PIP} install --user codecov;
     fi
   - 'echo "toolset: " ${toolset}'
   - 'echo "variant: " ${variant}'
@@ -130,16 +144,17 @@ before_install:
   - ulimit -a
 
 install:
+
   - touch ~/user-config.jam
   - 'if [[ $toolset == "gcc" ]]; then
-      g++-6 --version;
-      echo "using gcc : : ccache g++-6 : <linkflags>-fuse-ld=gold ;" >> ~/user-config.jam;
+      g++ --version;
+      echo "using gcc : : ccache g++ : <linkflags>-fuse-ld=gold ;" >> ~/user-config.jam;
     fi'
   - 'if [[ $toolset == "gcc-coverage" ]]; then
-      echo "using gcc : coverage : ccache g++-6 --coverage : <linkflags>--coverage ;" >> ~/user-config.jam;
+      echo "using gcc : coverage : ccache g++ --coverage : <linkflags>--coverage ;" >> ~/user-config.jam;
     fi'
   - 'if [[ $toolset == "gcc-arm" ]]; then
-      echo "using gcc : arm : ccache armv8l-linux-gnueabihf-g++ :
+      echo "using gcc : arm : ccache arm-linux-gnueabihf-g++ :
         <cxxflags>-Wno-psabi
         <cxxflags>-fsigned-char
         <cxxflags>-march=armv8-a+crc
@@ -149,52 +164,57 @@ install:
         <linkflags>-static-libstdc++
         <linkflags>-static-libgcc ;" >> ~/user-config.jam;
     fi;'
+  - 'if [[ $toolset == "gcc-s390x" ]]; then
+      echo "using gcc : s390x : ccache s390x-linux-gnu-g++-8 :
+        <linkflags>-lm
+        <linkflags>-static-libstdc++
+        <linkflags>-static-libgcc ;" >> ~/user-config.jam;
+    fi;'
   - 'if [ $clang_tidy == "1" ]; then
-      echo "using clang_tidy : : clang-tidy "-checks=-clang-analyzer-core.*,modernize-pass-by-value,modernize-use-auto,modernize-use-default-member-init,hicpp-deprecated-headers,readability-inconsistent-declaration-parameter-name,modernize-return-braced-init-list" : <cxxflags>-DBOOST_ASIO_DISABLE_STD_EXPERIMENTAL_STRING_VIEW=1 <cxxflags>-I/usr/local/clang-7.0.0/include/c++/v1 <cxxflags>-stdlib=libc++ <linkflags>-stdlib=libc++ ;" >> ~/user-config.jam;
+      echo "using clang_tidy : : clang-tidy-9 : <cxxflags>-DBOOST_ASIO_DISABLE_STD_EXPERIMENTAL_STRING_VIEW=1 <cxxflags>-I/usr/local/clang-7.0.0/include/c++/v1 <cxxflags>-stdlib=libc++ <linkflags>-stdlib=libc++ ;" >> ~/user-config.jam;
     fi'
   - 'if [[ $TRAVIS_OS_NAME == "osx" ]]; then
        echo "using darwin : : ccache clang++ : ;" >> ~/user-config.jam;
        echo "using darwin : ios_sim : ccache clang++ : <compileflags>-Wno-deprecated-declarations
        <compileflags>\"-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk\"
-       <compileflags>-mios-simulator-version-min=7
+       <compileflags>-mios-simulator-version-min=12
        <compileflags>-fobjc-abi-version=2
        <linkflags>\"-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk\"
-       <linkflags>-mios-simulator-version-min=7
+       <linkflags>-mios-simulator-version-min=12
        <linkflags>-fobjc-abi-version=2 ;" >>~/user-config.jam;
        echo "using darwin : ios : ccache clang++ : <compileflags>-Wno-deprecated-declarations
        <compileflags>\"-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk\"
-       <compileflags>-mios-version-min=7
-       <compileflags>\"-arch armv7\"
+       <compileflags>-mios-version-min=12
+       <compileflags>\"-arch arm64\"
        <compileflags>-fobjc-abi-version=2
        <linkflags>\"-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk\"
-       <linkflags>-mios-version-min=7
-       <linkflags>\"-arch armv7\"
+       <linkflags>-mios-version-min=12
+       <linkflags>\"-arch arm64\"
        <linkflags>-fobjc-abi-version=2 ;" >>~/user-config.jam;
     fi'
-  - 'echo "using python : 2.7 ;" >> ~/user-config.jam'
+  - 'echo "using python : : $(which python3) : /usr/local/Frameworks/Python.framework/Headers : : <target-os>darwin ;" >> ~/user-config.jam'
+  - 'echo "using python : : $(which python3) : : : <target-os>linux ;" >> ~/user-config.jam'
   - 'if [[ "$install_boost" = "1" ]]; then
       cd $BOOST_ROOT;
-      sudo ./b2 cxxstd=14 release install --with-python --with-system | grep -v "^common.copy " | grep -v "^\.\.\.skipped " | grep -v "th target\.\.\.$";
+      sudo ./b2 cxxstd=17 release install --with-python --with-system | grep -v "^common.copy " | grep -v "^\.\.\.skipped " | grep -v "th target\.\.\.$";
       cd tools/build/;
       echo "bootstrapping boost.build";
       ./bootstrap.sh;
       echo "installing boost.build";
       sudo ./b2 install --prefix=/usr/;
-      sudo ln -s /usr/local/lib/libboost_python27.so /usr/local/lib/libboost_python.so;
+      sudo ln -s /usr/local/lib/libboost_python37.so /usr/local/lib/libboost_python.so;
+      sudo ln -s /usr/local/lib/libboost_python36.so /usr/local/lib/libboost_python3.so;
       cd $TRAVIS_BUILD_DIR;
     fi;'
   - cat ~/user-config.jam
-  - if [ "$docs" == "1" ]; then rst2html.py --version; fi
-  - 'if [ "$lint" == "1" ]; then curl "https://raw.githubusercontent.com/google/styleguide/71ec7f1e524969c19ce33cfc72e8e023f2b98ee2/cpplint/cpplint.py" >~/cpplint.py; fi'
+  - if [ "$docs" == "1" ]; then rst2html --version; fi
   - 'if [ "$pylint" == "1" ]; then
-      sudo pip install flake8;
-      flake8 --version;
       sudo pip3 install flake8;
       python3 -m flake8 --version;
     fi'
   - 'if [ $sonar_scan == "1" ]; then
-      wget --quiet https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.2.0.1873-linux.zip;
-      wget --quiet https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip;
+      wget --no-verbose https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.2.0.1873-linux.zip;
+      wget --no-verbose https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip;
       unzip sonar-scanner-cli-4.2.0.1873-linux.zip;
       unzip build-wrapper-linux-x86.zip;
       export PATH=$PWD/sonar-scanner-4.2.0.1873-linux/bin:$PWD/build-wrapper-linux-x86:$PATH;
@@ -206,16 +226,28 @@ install:
 
   - 'if [[ "$arch" == "arm" ]]; then
       cd $TRAVIS_BUILD_DIR/test;
-      wget --quiet -O gcc-linaro.tar.xz https://releases.linaro.org/components/toolchain/binaries/6.5-2018.12/armv8l-linux-gnueabihf/gcc-linaro-6.5.0-2018.12-x86_64_armv8l-linux-gnueabihf.tar.xz;
-      tar xf gcc-linaro.tar.xz;
-      export PATH=${PWD}/gcc-linaro-6.5.0-2018.12-x86_64_armv8l-linux-gnueabihf/bin:${PATH};
-      armv8l-linux-gnueabihf-g++ --version;
-      travis_retry sudo apt-get install -y qemu-user-static;
-      wget --quiet -O ubuntu-base.tar.gz http://cdimage.ubuntu.com/ubuntu-base/releases/14.04/release/ubuntu-base-14.04.5-base-armhf.tar.gz;
+      wget --no-verbose -O gcc.tar.xz https://developer.arm.com/-/media/Files/downloads/gnu-a/8.2-2018.11/gcc-arm-8.2-2018.11-x86_64-arm-linux-gnueabihf.tar.xz;
+      tar xf gcc.tar.xz;
+      export PATH=$PWD/gcc-arm-8.2-2018.11-x86_64-arm-linux-gnueabihf/bin:$PATH;
+      arm-linux-gnueabihf-g++ --version;
+      ./gcc-arm-8.2-2018.11-x86_64-arm-linux-gnueabihf/bin/arm-linux-gnueabihf-g++ --version;
+      wget --no-verbose -O ubuntu-base.tar.gz http://cdimage.ubuntu.com/ubuntu-base/releases/19.10/release/ubuntu-base-19.10-base-armhf.tar.gz;
       sudo mkdir rootfs;
       sudo tar xf ubuntu-base.tar.gz -C rootfs;
       sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/;
       sudo chroot rootfs mount -t proc none /proc;
+    fi'
+
+  - 'if [[ "$arch" == "s390x" ]]; then
+      cd $TRAVIS_BUILD_DIR/test;
+      s390x-linux-gnu-g++-8 --version;
+      wget --no-verbose -O ubuntu-base.tar.gz http://cdimage.ubuntu.com/ubuntu-base/releases/19.10/release/ubuntu-base-19.10-base-s390x.tar.gz;
+      sudo mkdir rootfs;
+      sudo tar xf ubuntu-base.tar.gz -C rootfs;
+      sudo cp /usr/bin/qemu-s390x-static rootfs/usr/bin/;
+      sudo chroot rootfs mount -t proc none /proc;
+      sudo mount -o bind /sys rootfs/sys/;
+      sudo chroot rootfs lscpu;
     fi'
 
   - if [[ "$cmake" == "1" ]]; then
@@ -224,7 +256,7 @@ install:
     fi
 
   - if [[ "$crypto" == "wolfssl" ]]; then
-      wget --quiet -O wolfssl-4.2.0-stable.zip https://github.com/wolfSSL/wolfssl/archive/v4.2.0-stable.zip;
+      wget --no-verbose -O wolfssl-4.2.0-stable.zip https://github.com/wolfSSL/wolfssl/archive/v4.2.0-stable.zip;
       unzip wolfssl-4.2.0-stable.zip;
       cd wolfssl-4.2.0-stable;
       ./autogen.sh && ./configure --enable-asio --enable-sni --enable-nginx && make && sudo make install;
@@ -235,37 +267,40 @@ script:
 
   - cd $TRAVIS_BUILD_DIR/docs;
   - 'if [ "$docs" == "1" ]; then
-      make spell-check html RST2HTML=rst2html.py AAFIGURE=echo;
+      make spell-check html;
     fi'
 
-  - cd $TRAVIS_BUILD_DIR;
-  - 'if [ "$lint" == "1" ]; then
-      python ~/cpplint.py --extensions=cpp --headers=hpp --filter=-,+runtime/explicit,+whitespace/end_of_line --linelength=90 test/*.{cpp,hpp} src/*.cpp include/libtorrent/*.hpp include/libtorrent/kademlia/*.hpp src/kademlia/*.cpp include/libtorrent/aux_/*.hpp include/libtorrent/extensions/*.hpp simulation/*.{cpp,hpp} tools/*.{cpp,hpp} examples/*.{cpp,hpp};
-    fi'
+  - cd $TRAVIS_BUILD_DIR
   - 'if [ "$pylint" == "1" ]; then
-      flake8 --max-line-length=120;
-      python3 -m flake8 --max-line-length=120;
+      python3 -m flake8 --max-line-length=120 --ignore=E741,W504,E126,W503,E121,E124,E123,E402 --exclude=deps/libdatachannel,deps/json,bindings/c;
     fi'
   - 'if [ "$sonar_scan" == "1" ]; then
-       build-wrapper-linux-x86-64 --out-dir bw-output ${B2} -a -j2 cxxstd=14 optimization=off crypto=$crypto deprecated-functions=off $toolset variant=$variant -l300 &&
+       build-wrapper-linux-x86-64 --out-dir bw-output ${B2} -a -j2 cxxstd=17 optimization=off crypto=$crypto deprecated-functions=off $toolset variant=$variant -l300 &&
        sonar-scanner -D sonar.login=$SONAR_TOKEN;
     fi'
   - 'if [[ $clang_tidy == "1" ]]; then
-       which clang-tidy;
-       clang-tidy --version;
-       ${B2} -a -j2 clang_tidy;
+       which clang-tidy-9;
+       clang-tidy-9 --version;
+       ${B2} -a -j2 crypto=openssl cxxstd=17 clang_tidy;
     fi'
 
   # the common boost-build command line arguments. It's important they are all
   # the same, in order for builds to be reused between invocations
-  - export B2_ARGS="sanitize=$sanitizer mmap-disk-io=$mmap warnings=all crypto=$crypto debug-iterators=on picker-debugging=on asserts=on invariant-checks=full $toolset variant=$variant"
+  - export B2_ARGS="export-extra=on mmap-disk-io=$mmap warnings=all crypto=$crypto debug-iterators=on picker-debugging=on asserts=on invariant-checks=full $toolset variant=$variant"
+  - 'if [[ $sanitizer == "on" ]]; then
+      export B2_ARGS="${B2_ARGS} address-sanitizer=norecover undefined-sanitizer=norecover";
+    fi'
 
   - 'if [[ $TRAVIS_OS_NAME == "osx" && "$crypto" == "openssl" ]]; then
     export B2_ARGS="${B2_ARGS} openssl-lib=/usr/local/opt/openssl@1.1/lib openssl-include=/usr/local/opt/openssl@1.1/include" ;
     fi'
 
+  - 'if [[ $webtorrent == "on" ]]; then
+      export B2_ARGS="${B2_ARGS} webtorrent=on";
+    fi'
+
   - 'if [ "$check_headers" == "1" ]; then
-      ${B2} -j2 check-headers ${B2_ARGS};
+      ${B2} -j2 crypto=openssl check-headers ${B2_ARGS};
     fi'
 
 # if we are building with code coverage, report it as soon as possible
@@ -276,11 +311,16 @@ script:
       travis_retry ${B2} -j3 warnings-as-errors=on ${B2_ARGS} -l300 &&
       travis_retry ${B2} -j2 warnings-as-errors=on ${B2_ARGS} test_natpmp enum_if -l300 &&
       if [[ $TRAVIS_OS_NAME != "osx" ]]; then
-        travis_retry ${B2} -j2 warnings-as-errors=on sanitize=$sanitizer ${B2_ARGS} test_lsd -l300;
+        travis_retry ${B2} -j2 warnings-as-errors=on ${B2_ARGS} test_lsd -l300;
       fi &&
       if [ "$coverage" == "1" ]; then
-        codecov --root .. --gcov-exec gcov-5;
+        codecov --root .. >/dev/null;
       fi;
+    fi'
+
+  - cd $TRAVIS_BUILD_DIR/bindings/c;
+  - 'if [ "$cbinding" == "1" ]; then
+      ${B2} -j2 warnings-as-errors=on warnings=all ${B2_ARGS} link=shared;
     fi'
 
   # build fuzzers with the same build configuration as the test above, to avoid
@@ -302,7 +342,7 @@ script:
 
   - cd $TRAVIS_BUILD_DIR;
   - if [[ $ios == "1" ]]; then
-      ${B2} -j2 -q warnings-as-errors=on darwin-ios darwin-ios_sim link=static cxxstd=14;
+      ${B2} -j2 -q warnings-as-errors=on darwin-ios darwin-ios_sim address-model=64 link=static cxxstd=17;
     fi
 
 # a binary built with sanitizer does not interact well with python
@@ -312,9 +352,9 @@ script:
   - 'if [[ "$python" == "1" ]]; then
       ${B2} -j2 ${B2_ARGS} stage_module stage_dependencies libtorrent-link=shared boost-link=shared &&
       if [[ $TRAVIS_OS_NAME == "osx" ]]; then
-        DYLD_LIBRARY_PATH=./dependencies python2 test.py -b;
+        DYLD_LIBRARY_PATH=./dependencies python3 test.py -b;
       else
-        LD_LIBRARY_PATH=./dependencies python test.py -b;
+        LD_LIBRARY_PATH=./dependencies python3 test.py -b;
       fi;
     fi'
   - 'if [[ "$python_dist" == "1" ]]; then
@@ -332,9 +372,9 @@ script:
   - cd $TRAVIS_BUILD_DIR;
   - mkdir build && cd build
   - if [[ "$cmake" == "1" ]]; then
-      export CXX=g++-6 &&
-      export CC=gcc-6 &&
-      BOOST_LIBRARYDIR=/usr/local/lib cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Werror" -DCMAKE_CXX_STANDARD=14 -Dbuild_tests=ON -Dbuild_examples=ON -Dbuild_tools=ON -Dpython-bindings=ON -G Ninja .. &&
+      export CXX=g++ &&
+      export CC=gcc &&
+      BOOST_LIBRARYDIR=/usr/local/lib cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Werror" -DCMAKE_CXX_STANDARD=17 -Dbuild_tests=ON -Dbuild_examples=ON -Dbuild_tools=ON -Dpython-bindings=ON -G Ninja .. &&
       cmake --build . --parallel 2;
     fi
 
@@ -352,7 +392,21 @@ script:
   - cd $TRAVIS_BUILD_DIR/test;
   - 'if [[ "$arch" == "arm" ]];
     then
-      ${B2} arm-tests warnings-as-errors=on warnings=all crypto=$crypto variant=test_arm $toolset target-os=linux link=static testing.execute=off;
-      sudo cp -R bin rootfs/;
-      travis_retry ${B2} arm-tests warnings-as-errors=on warnings=all crypto=$crypto variant=test_arm $toolset target-os=linux link=static testing.launcher="sudo chroot rootfs";
+      ${B2} arm-tests warnings-as-errors=on warnings=all crypto=$crypto dht=off extensions=off logging=off deprecated-functions=off invariant-checks=off export-extra=on asserts=on $toolset target-os=linux link=static testing.execute=off;
+      sudo cp -R bin rootfs/home;
+      echo "#!/bin/sh\ncd home\nexec $1" > test-launcher.sh;
+      cat test-launcher.sh;
+      chmod +x test-launcher.sh;
+      sudo cp test-launcher.sh rootfs;
+      travis_retry ${B2} arm-tests warnings-as-errors=on warnings=all crypto=$crypto dht=off extensions=off logging=off deprecated-functions=off invariant-checks=off export-extra=on asserts=on $toolset target-os=linux link=static testing.launcher="sudo chroot rootfs /bin/sh test-launcher.sh";
+    fi'
+  - 'if [[ "$arch" == "s390x" ]];
+    then
+      ${B2} s390x-tests warnings-as-errors=on warnings=all crypto=$crypto dht=on extensions=off logging=off deprecated-functions=off invariant-checks=off export-extra=on asserts=on $toolset target-os=linux link=static testing.execute=off;
+      sudo cp -R bin rootfs/home;
+      echo "#!/bin/sh\ncd home\nexec $1" > test-launcher.sh;
+      cat test-launcher.sh;
+      chmod +x test-launcher.sh;
+      sudo cp test-launcher.sh rootfs;
+      travis_retry ${B2} s390x-tests warnings-as-errors=on warnings=all crypto=$crypto dht=on extensions=off logging=off deprecated-functions=off invariant-checks=off export-extra=on asserts=on $toolset target-os=linux link=static testing.launcher="sudo chroot rootfs /bin/sh test-launcher.sh";
     fi'

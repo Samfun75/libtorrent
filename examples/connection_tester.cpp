@@ -39,7 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/socket.hpp"
 #include "libtorrent/address.hpp"
 #include "libtorrent/error_code.hpp"
-#include "libtorrent/io.hpp"
+#include "libtorrent/aux_/io_bytes.hpp"
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/create_torrent.hpp"
 #include "libtorrent/hasher.hpp"
@@ -256,7 +256,7 @@ struct peer_conn
 		char* h = (char*)malloc(sizeof(handshake));
 		memcpy(h, handshake, sizeof(handshake));
 		std::memcpy(h + 28, info_hash, 20);
-		std::generate(h + 48, h + 68, &rand);
+		std::generate(h + 48, h + 68, [](){ return char(rand()); } );
 		// for seeds, don't send the interested message
 		boost::asio::async_write(s, boost::asio::buffer(h, (sizeof(handshake) - 1) - (seed ? 5 : 0))
 			, std::bind(&peer_conn::on_handshake, this, h, _1, _2));
@@ -729,8 +729,6 @@ void print_usage()
 		"    -s <size>          the size of the torrent in megabytes\n"
 		"    -n <num-files>     the number of files in the test torrent\n"
 		"    -t <file>          the file to save the .torrent file to\n"
-		"    -T <name>          the name of the torrent (and directory\n"
-		"                       its files are saved in)\n\n"
 		"  gen-data             generate the data file(s) for the test torrent\n"
 		"    options for this command:\n"
 		"    -t <file>          the torrent file that was previously generated\n"
@@ -758,20 +756,56 @@ void print_usage()
 	exit(1);
 }
 
-void hasher_thread(lt::create_torrent* t, piece_index_t const start_piece
-	, piece_index_t const end_piece, int piece_size, bool print)
+void hasher_thread(lt::aux::vector<sha1_hash, piece_index_t>* output
+	, lt::file_storage const& fs
+	, piece_index_t const start_piece
+	, piece_index_t const end_piece
+	, bool print)
 {
 	if (print) std::fprintf(stderr, "\n");
 	std::uint32_t piece[0x4000 / 4];
+	int const piece_size = fs.piece_length();
+
+	std::vector<file_slice> files = fs.map_block(start_piece, 0
+		, std::min(static_cast<int>(end_piece - start_piece) * std::int64_t(piece_size)
+			, fs.total_size() - static_cast<int>(start_piece) * std::int64_t(piece_size)));
+
 	for (piece_index_t i = start_piece; i < end_piece; ++i)
 	{
 		hasher ph;
 		for (int j = 0; j < piece_size; j += 0x4000)
 		{
 			generate_block(piece, i, j);
+
+			// if any part of this block overlaps with a pad-file, we need to
+			// clear those bytes to 0
+			for (int k = 0; k < 0x4000; )
+			{
+				if (files.empty())
+				{
+					TORRENT_ASSERT(i == prev(end_piece));
+					TORRENT_ASSERT(k > 0);
+					TORRENT_ASSERT(k < 0x4000);
+					// this is the last piece of the torrent, and the piece
+					// extends a bit past the end of the last file. This part
+					// should be truncated
+					ph.update(reinterpret_cast<char*>(piece), k);
+					goto out;
+				}
+				auto& f = files.front();
+				int const range = int(std::min(std::int64_t(0x4000 - k), f.size));
+				if (fs.pad_file_at(f.file_index))
+					std::memset(reinterpret_cast<char*>(piece) + k, 0, range);
+
+				f.offset += range;
+				f.size -= range;
+				k += range;
+				if (f.size == 0) files.erase(files.begin());
+			}
 			ph.update(reinterpret_cast<char*>(piece), 0x4000);
 		}
-		t->set_hash(i, ph.final());
+out:
+		(*output)[i] = ph.final();
 		int const range = static_cast<int>(end_piece) - static_cast<int>(start_piece);
 		if (print && (static_cast<int>(i) & 1))
 		{
@@ -804,7 +838,7 @@ void generate_torrent(std::vector<char>& buf, int num_pieces, int num_files
 		file_size += 200;
 	}
 
-	lt::create_torrent t(fs, piece_size);
+	lt::create_torrent t(fs, piece_size, lt::create_torrent::v1_only);
 
 	num_pieces = t.num_pieces();
 
@@ -814,20 +848,22 @@ void generate_torrent(std::vector<char>& buf, int num_pieces, int num_files
 
 	std::vector<std::thread> threads;
 	threads.reserve(num_threads);
+	lt::aux::vector<lt::sha1_hash, piece_index_t> hashes(num_pieces);
 	for (int i = 0; i < num_threads; ++i)
 	{
-		threads.emplace_back(&hasher_thread, &t
+		threads.emplace_back(&hasher_thread, &hashes, t.files()
 			, piece_index_t(i * num_pieces / num_threads)
 			, piece_index_t((i + 1) * num_pieces / num_threads)
-			, piece_size
 			, i == 0);
 	}
 
 	for (auto& i : threads)
 		i.join();
 
-	std::back_insert_iterator<std::vector<char>> out(buf);
-	bencode(out, t.generate());
+	for (auto i : t.files().piece_range())
+		t.set_hash(i, hashes[i]);
+
+	bencode(std::back_inserter(buf), t.generate());
 }
 
 void write_handler(file_storage const& fs
@@ -841,6 +877,13 @@ void write_handler(file_storage const& fs
 		return;
 	}
 
+
+	if (static_cast<int>(piece) & 1)
+	{
+		std::fprintf(stderr, "\r%.1f %% "
+			, float(static_cast<int>(piece) * 100) / float(fs.num_pieces()));
+	}
+
 	if (piece >= fs.end_piece()) return;
 	offset += 0x4000;
 	if (offset >= fs.piece_size(piece))
@@ -848,23 +891,25 @@ void write_handler(file_storage const& fs
 		offset = 0;
 		++piece;
 	}
-	if (piece >= fs.end_piece()) return;
-
-	if (static_cast<int>(piece) & 1)
+	if (piece >= fs.end_piece())
 	{
-		std::fprintf(stderr, "\r%.1f %% "
-			, float(static_cast<int>(piece) * 100) / float(fs.num_pieces()));
+		disk.abort(false);
+		return;
 	}
+
 	std::uint32_t buffer[0x4000 / 4];
 	generate_block(buffer, piece, offset);
 
 	int const left_in_piece = fs.piece_size(piece) - offset;
+	if (left_in_piece <= 0) return;
 
 	disk.async_write(st, { piece, offset, std::min(left_in_piece, 0x4000)}
 		, reinterpret_cast<char const*>(buffer)
 		, std::shared_ptr<disk_observer>()
 		, [&](lt::storage_error const& error)
 		{ write_handler(fs, disk, st, piece, offset, error); });
+
+	disk.submit_jobs();
 }
 
 void generate_data(char const* path, torrent_info const& ti)
@@ -906,6 +951,8 @@ void generate_data(char const* path, torrent_info const& ti)
 	{
 		write_handler(fs, *disk, st, piece, offset, lt::storage_error());
 	}
+
+	disk->submit_jobs();
 
 	ios.run();
 }
@@ -1035,7 +1082,7 @@ int main(int argc, char* argv[])
 			}
 			// 1 MiB piece size
 			const int piece_size = 1024 * 1024;
-			lt::create_torrent t(fs, piece_size);
+			lt::create_torrent t(fs, piece_size, lt::create_torrent::v1_only);
 			sha1_hash zero(nullptr);
 			for (auto const k : fs.piece_range())
 				t.set_hash(k, zero);
@@ -1117,7 +1164,7 @@ int main(int argc, char* argv[])
 		if (test_mode == upload_test) seed = true;
 		else if (test_mode == dual_test) seed = (i & 1);
 		conns.push_back(new peer_conn(ios[i % num_threads], ti.num_pieces(), ti.piece_length() / 16 / 1024
-			, ep, (char const*)ti.info_hash().v1.data(), seed, churn, corrupt));
+			, ep, (char const*)ti.info_hash().data(), seed, churn, corrupt));
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		ios[i % num_threads].poll_one();
 	}

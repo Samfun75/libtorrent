@@ -45,31 +45,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 namespace libtorrent {
 
-#ifndef TORRENT_DISABLE_EXTENSIONS
-	// declared in extensions.hpp
-	// remove this once C++17 is required
-	constexpr feature_flags_t plugin::optimistic_unchoke_feature;
-	constexpr feature_flags_t plugin::tick_feature;
-	constexpr feature_flags_t plugin::dht_request_feature;
-	constexpr feature_flags_t plugin::alert_feature;
-#endif
-
-namespace aux {
-	constexpr torrent_list_index_t session_interface::torrent_state_updates;
-	constexpr torrent_list_index_t session_interface::torrent_want_tick;
-	constexpr torrent_list_index_t session_interface::torrent_want_peers_download;
-	constexpr torrent_list_index_t session_interface::torrent_want_peers_finished;
-	constexpr torrent_list_index_t session_interface::torrent_want_scrape;
-	constexpr torrent_list_index_t session_interface::torrent_downloading_auto_managed;
-	constexpr torrent_list_index_t session_interface::torrent_seeding_auto_managed;
-	constexpr torrent_list_index_t session_interface::torrent_checking_auto_managed;
-}
-
-#ifndef TORRENT_DISABLE_EXTENSIONS
-constexpr add_peer_flags_t torrent_plugin::first_time;
-constexpr add_peer_flags_t torrent_plugin::filtered;
-#endif
-
 namespace {
 
 #if defined TORRENT_ASIO_DEBUGGING
@@ -78,7 +53,7 @@ namespace {
 		int counter = 0;
 		while (log_async())
 		{
-			std::this_thread::sleep_for(seconds(1));
+			std::this_thread::sleep_for(milliseconds(300));
 			++counter;
 			std::printf("\x1b[2J\x1b[0;0H\x1b[33m==== Waiting to shut down: %d ==== \x1b[0m\n\n"
 				, counter);
@@ -140,10 +115,6 @@ namespace {
 		// it to disk, and don't read anything from the
 		// socket until the disk write is complete
 		set.set_int(settings_pack::max_queued_disk_bytes, 1);
-
-		// don't keep track of all upnp devices, keep
-		// the device list small
-		set.set_bool(settings_pack::upnp_ignore_nonrouters, true);
 
 		// never keep more than one 16kB block in
 		// the send buffer
@@ -220,8 +191,7 @@ namespace {
 
 		set.set_int(settings_pack::max_rejects, 10);
 
-		set.set_int(settings_pack::recv_socket_buffer_size, 1024 * 1024);
-		set.set_int(settings_pack::send_socket_buffer_size, 1024 * 1024);
+		set.set_int(settings_pack::send_not_sent_low_watermark, 524288);
 
 		// don't let connections linger for too long
 		set.set_int(settings_pack::request_timeout, 10);
@@ -415,18 +385,7 @@ namespace {
 #endif
 
 #if TORRENT_ABI_VERSION == 1
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef _MSC_VER
-#pragma warning(push, 1)
-#pragma warning(disable: 4996)
-#endif
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
 	session::session(fingerprint const& print, session_flags_t const flags
 		, alert_category_t const alert_mask)
 	{
@@ -470,22 +429,15 @@ namespace {
 		}
 		start(flags, std::move(pack), nullptr);
 	}
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 #endif // TORRENT_ABI_VERSION
 	session& session::operator=(session&&) & = default;
 
 	session::~session()
 	{
+		if (!m_impl) return;
+
 		aux::dump_call_profile();
-		TORRENT_ASSERT(m_impl);
 
 		// capture the shared_ptr in the dispatched function
 		// to keep the session_impl alive
@@ -535,7 +487,13 @@ namespace {
 		io_context& ios, settings_interface const& sett, counters& cnt)
 	{
 #if TORRENT_HAVE_MMAP || TORRENT_HAVE_MAP_VIEW_OF_FILE
-		return mmap_disk_io_constructor(ios, sett, cnt);
+		// TODO: In C++17. use if constexpr instead
+#include "libtorrent/aux_/disable_deprecation_warnings_push.hpp"
+		if (sizeof(void*) == 8)
+			return mmap_disk_io_constructor(ios, sett, cnt);
+		else
+			return posix_disk_io_constructor(ios, sett, cnt);
+#include "libtorrent/aux_/disable_warnings_pop.hpp"
 #else
 		return posix_disk_io_constructor(ios, sett, cnt);
 #endif

@@ -58,8 +58,6 @@ POSSIBILITY OF SUCH DAMAGE.
 // * save and restore state via the session state
 // * see all alerts that are posted
 //
-// .. _extensions: extension_protocol.html
-//
 // a word of caution
 // -----------------
 //
@@ -84,7 +82,7 @@ POSSIBILITY OF SUCH DAMAGE.
 //
 //
 // plugin-interface
-// ================
+// ----------------
 //
 // The plugin interface consists of three base classes that the plugin may
 // implement. These are called plugin, torrent_plugin and peer_plugin.
@@ -99,9 +97,11 @@ POSSIBILITY OF SUCH DAMAGE.
 // torrent has already been started and you want to hook in the extension at
 // run-time).
 //
-// The signature of the function is::
+// The signature of the function is:
 //
-// 	std::shared_ptr<torrent_plugin> (*)(torrent_handle const&, void*);
+// .. code:: c++
+//
+// 	std::shared_ptr<torrent_plugin> (*)(torrent_handle const&, client_data_t);
 //
 // The second argument is the userdata passed to ``session::add_torrent()`` or
 // ``torrent_handle::add_extension()``.
@@ -117,7 +117,7 @@ POSSIBILITY OF SUCH DAMAGE.
 // it in to ``session::add_extension()``.
 //
 // custom alerts
-// =============
+// -------------
 //
 // Since plugins are running within internal libtorrent threads, one convenient
 // way to communicate with the client is to post custom alerts.
@@ -191,21 +191,25 @@ TORRENT_VERSION_NAMESPACE_3
 		// hidden
 		virtual ~plugin() {}
 
+#if TORRENT_ABI_VERSION == 1
+		using feature_flags_t = libtorrent::feature_flags_t;
+#endif
+
 		// include this bit if your plugin needs to alter the order of the
 		// optimistic unchoke of peers. i.e. have the on_optimistic_unchoke()
 		// callback be called.
-		static constexpr feature_flags_t optimistic_unchoke_feature = 1_bit;
+		static inline constexpr feature_flags_t optimistic_unchoke_feature = 1_bit;
 
 		// include this bit if your plugin needs to have on_tick() called
-		static constexpr feature_flags_t tick_feature = 2_bit;
+		static inline constexpr feature_flags_t tick_feature = 2_bit;
 
 		// include this bit if your plugin needs to have on_dht_request()
 		// called
-		static constexpr feature_flags_t dht_request_feature = 3_bit;
+		static inline constexpr feature_flags_t dht_request_feature = 3_bit;
 
 		// include this bit if your plugin needs to have on_alert()
 		// called
-		static constexpr feature_flags_t alert_feature = 4_bit;
+		static inline constexpr feature_flags_t alert_feature = 4_bit;
 
 		// This function is expected to return a bitmask indicating which features
 		// this plugin implements. Some callbacks on this object may not be called
@@ -217,13 +221,13 @@ TORRENT_VERSION_NAMESPACE_3
 
 		// this is called by the session every time a new torrent is added.
 		// The ``torrent*`` points to the internal torrent object created
-		// for the new torrent. The ``void*`` is the userdata pointer as
+		// for the new torrent. The client_data_t is the userdata pointer as
 		// passed in via add_torrent_params.
 		//
 		// If the plugin returns a torrent_plugin instance, it will be added
 		// to the new torrent. Otherwise, return an empty shared_ptr to a
 		// torrent_plugin (the default).
-		virtual std::shared_ptr<torrent_plugin> new_torrent(torrent_handle const&, void*)
+		virtual std::shared_ptr<torrent_plugin> new_torrent(torrent_handle const&, client_data_t)
 		{ return std::shared_ptr<torrent_plugin>(); }
 
 		// called when plugin is added to a session
@@ -294,6 +298,10 @@ TORRENT_VERSION_NAMESPACE_3_END
 		// hidden
 		virtual ~torrent_plugin() {}
 
+#if TORRENT_ABI_VERSION == 1
+		using flags_t = libtorrent::add_peer_flags_t;
+#endif
+
 		// This function is called each time a new peer is connected to the torrent. You
 		// may choose to ignore this by just returning a default constructed
 		// ``shared_ptr`` (in which case you don't need to override this member
@@ -349,16 +357,12 @@ TORRENT_VERSION_NAMESPACE_3_END
 		// enum members
 		virtual void on_state(torrent_status::state_t) {}
 
-		// called every time policy::add_peer is called
-		// src is a bitmask of which sources this peer
-		// has been seen from. flags is a bitmask of:
-
 		// this is the first time we see this peer
-		static constexpr add_peer_flags_t first_time = 1_bit;
+		static inline constexpr add_peer_flags_t first_time = 1_bit;
 
 		// this peer was not added because it was
 		// filtered by the IP filter
-		static constexpr add_peer_flags_t filtered = 2_bit;
+		static inline constexpr add_peer_flags_t filtered = 2_bit;
 
 		// called every time a new peer is added to the peer list.
 		// This is before the peer is connected to. For ``flags``, see

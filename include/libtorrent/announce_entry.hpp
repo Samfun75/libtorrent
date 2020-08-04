@@ -41,7 +41,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/string_view.hpp"
 #include "libtorrent/socket.hpp"
-#include "libtorrent/aux_/listen_socket_handle.hpp"
 #include "libtorrent/aux_/array.hpp"
 #include "libtorrent/info_hash.hpp"
 
@@ -51,11 +50,14 @@ POSSIBILITY OF SUCH DAMAGE.
 
 namespace libtorrent {
 
-	struct torrent;
+namespace aux { struct torrent; }
+
+TORRENT_VERSION_NAMESPACE_2
 
 	struct TORRENT_EXPORT announce_infohash
 	{
-		announce_infohash();
+		// internal
+		TORRENT_UNEXPORT announce_infohash();
 
 		// if this tracker has returned an error or warning message
 		// that message is stored here
@@ -108,28 +110,28 @@ namespace libtorrent {
 		// internal
 		bool triggered_manually : 1;
 
+#if TORRENT_ABI_VERSION <= 2
 		// reset announce counters and clears the started sent flag.
 		// The announce_endpoint will look like we've never talked to
 		// the tracker.
-		void reset();
+		TORRENT_DEPRECATED void reset();
 
 		// updates the failure counter and time-outs for re-trying.
 		// This is called when the tracker announce fails.
-		void failed(int backoff_ratio, seconds32 retry_interval = seconds32(0));
+		TORRENT_DEPRECATED void failed(int backoff_ratio, seconds32 retry_interval = seconds32(0));
 
 		// returns true if we can announce to this tracker now.
 		// The current time is passed in as ``now``. The ``is_seed``
 		// argument is necessary because once we become a seed, we
 		// need to announce right away, even if the re-announce timer
 		// hasn't expired yet.
-		bool can_announce(time_point now, bool is_seed, std::uint8_t fail_limit) const;
+		TORRENT_DEPRECATED bool can_announce(time_point now, bool is_seed, std::uint8_t fail_limit) const;
 
 		// returns true if the last time we tried to announce to this
 		// tracker succeeded, or if we haven't tried yet.
-		bool is_working() const { return fails == 0; }
+		TORRENT_DEPRECATED bool is_working() const { return fails == 0; }
+#endif
 	};
-
-TORRENT_VERSION_NAMESPACE_2
 
 	// announces are sent to each tracker using every listen socket
 	// this class holds information about one listen socket for one tracker
@@ -142,11 +144,8 @@ TORRENT_VERSION_NAMESPACE_2
 #if TORRENT_ABI_VERSION <= 2
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 #endif
-		friend struct lt::torrent;
-		friend struct announce_entry;
 
-		// internal
-		announce_endpoint(aux::listen_socket_handle const& s, bool completed);
+		announce_endpoint();
 
 		// the local endpoint of the listen interface associated with this endpoint
 		tcp::endpoint local_endpoint;
@@ -158,12 +157,12 @@ TORRENT_VERSION_NAMESPACE_2
 		// info_hashes[1] is the v2 info hash (truncated SHA-256)
 		aux::array<announce_infohash, num_protocols, protocol_version> info_hashes;
 
+#if TORRENT_ABI_VERSION <= 2
 		// reset announce counters and clears the started sent flag.
 		// The announce_endpoint will look like we've never talked to
 		// the tracker.
-		void reset();
+		TORRENT_DEPRECATED void reset();
 
-#if TORRENT_ABI_VERSION <= 2
 		// deprecated in 2.0, use announce_infohash::can_announce
 		// returns true if we can announce to this tracker now.
 		// The current time is passed in as ``now``. The ``is_seed``
@@ -178,22 +177,21 @@ TORRENT_VERSION_NAMESPACE_2
 		TORRENT_DEPRECATED bool is_working() const;
 
 		// for backwards compatibility
-		time_point32 TORRENT_DEPRECATED_MEMBER next_announce = (time_point32::min)();
-		time_point32 TORRENT_DEPRECATED_MEMBER min_announce = (time_point32::min)();
-		std::string TORRENT_DEPRECATED_MEMBER message;
-		error_code TORRENT_DEPRECATED_MEMBER last_error;
-		int TORRENT_DEPRECATED_MEMBER scrape_incomplete = -1;
-		int TORRENT_DEPRECATED_MEMBER scrape_complete = -1;
-		int TORRENT_DEPRECATED_MEMBER scrape_downloaded = -1;
-		std::uint8_t TORRENT_DEPRECATED_MEMBER fails : 7;
-		bool TORRENT_DEPRECATED_MEMBER updating : 1;
-		bool TORRENT_DEPRECATED_MEMBER start_sent : 1;
-		bool TORRENT_DEPRECATED_MEMBER complete_sent : 1;
+		TORRENT_DEPRECATED time_point32 next_announce = (time_point32::min)();
+		TORRENT_DEPRECATED time_point32 min_announce = (time_point32::min)();
+		TORRENT_DEPRECATED std::string message;
+		TORRENT_DEPRECATED error_code last_error;
+		TORRENT_DEPRECATED int scrape_incomplete = -1;
+		TORRENT_DEPRECATED int scrape_complete = -1;
+		TORRENT_DEPRECATED int scrape_downloaded = -1;
+		TORRENT_DEPRECATED std::uint8_t fails : 7;
+		TORRENT_DEPRECATED bool updating : 1;
+		TORRENT_DEPRECATED bool start_sent : 1;
+		TORRENT_DEPRECATED bool complete_sent : 1;
 #endif
 
-	private:
-		// internal
-		aux::listen_socket_handle socket;
+		// set to false to not announce from this endpoint
+		bool enabled = true;
 	};
 
 	// this class holds information about one bittorrent tracker, as it
@@ -251,19 +249,24 @@ TORRENT_VERSION_NAMESPACE_2
 		// deprecated in 1.2
 		// all of these will be set to false or 0
 		// use the corresponding members in announce_endpoint
-		std::uint8_t TORRENT_DEPRECATED_MEMBER fails:7;
-		bool TORRENT_DEPRECATED_MEMBER send_stats:1;
-		bool TORRENT_DEPRECATED_MEMBER start_sent:1;
-		bool TORRENT_DEPRECATED_MEMBER complete_sent:1;
+		TORRENT_DEPRECATED std::uint8_t fails:7;
+		TORRENT_DEPRECATED bool send_stats:1;
+		TORRENT_DEPRECATED bool start_sent:1;
+		TORRENT_DEPRECATED bool complete_sent:1;
 		// internal
-		bool TORRENT_DEPRECATED_MEMBER triggered_manually:1;
-		bool TORRENT_DEPRECATED_MEMBER updating:1;
+		TORRENT_DEPRECATED bool triggered_manually:1;
+		TORRENT_DEPRECATED bool updating:1;
 #endif
 
+#if TORRENT_ABI_VERSION <= 2
 		// reset announce counters and clears the started sent flag.
 		// The announce_entry will look like we've never talked to
 		// the tracker.
-		void reset();
+		TORRENT_DEPRECATED void reset();
+
+		// trims whitespace characters from the beginning of the URL.
+		TORRENT_DEPRECATED void trim();
+#endif
 
 #if TORRENT_ABI_VERSION == 1
 		// deprecated in 1.2, use announce_endpoint::can_announce
@@ -279,12 +282,6 @@ TORRENT_VERSION_NAMESPACE_2
 		// tracker succeeded, or if we haven't tried yet.
 		TORRENT_DEPRECATED bool is_working() const;
 #endif
-
-		// internal
-		announce_endpoint* find_endpoint(aux::listen_socket_handle const& s);
-
-		// trims whitespace characters from the beginning of the URL.
-		void trim();
 	};
 
 TORRENT_VERSION_NAMESPACE_2_END

@@ -33,43 +33,77 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <cstdio>
-#include <libtorrent/enum_net.hpp>
-#include <libtorrent/socket.hpp>
-#include <libtorrent/broadcast_socket.hpp>
+#include <string>
+#include "libtorrent/enum_net.hpp"
+#include "libtorrent/socket.hpp"
+#include "libtorrent/aux_/ip_helpers.hpp"
 
 using namespace lt;
+
+namespace {
+
+std::string operator "" _s(char const* str, size_t len) { return std::string(str, len); }
+
+std::string print_flags(interface_flags const f)
+{
+	return
+		((f & if_flags::up) ? "UP "_s : ""_s)
+		+ ((f & if_flags::broadcast) ? "BROADCAST "_s : ""_s)
+		+ ((f & if_flags::loopback) ? "LOOP "_s : ""_s)
+		+ ((f & if_flags::pointopoint) ? "PPP "_s : ""_s)
+		+ ((f & if_flags::running) ? "RUN "_s : ""_s)
+		+ ((f & if_flags::noarp) ? "NOARP "_s : ""_s)
+		+ ((f & if_flags::promisc) ? "PROMISC "_s : ""_s)
+		+ ((f & if_flags::allmulti) ? "ALLMULTI "_s : ""_s)
+		+ ((f & if_flags::master) ? "MASTER "_s : ""_s)
+		+ ((f & if_flags::slave) ? "SLAVE "_s : ""_s)
+		+ ((f & if_flags::multicast) ? "MULTICAST "_s : ""_s)
+		+ ((f & if_flags::dynamic) ? "SYN "_s : ""_s)
+		+ ((f & if_flags::lower_up) ? "LWR_UP "_s : ""_s)
+		+ ((f & if_flags::dormant) ? "DORMANT "_s : ""_s)
+		;
+}
+
+char const* print_state(if_state const s)
+{
+	switch (s)
+	{
+		case if_state::up: return "up";
+		case if_state::dormant: return "dormant";
+		case if_state::lowerlayerdown: return "lowerlayerdown";
+		case if_state::down: return "down";
+		case if_state::notpresent: return "notpresent";
+		case if_state::testing: return "testing";
+		case if_state::unknown: return "unknown";
+	};
+	return "unknown";
+}
+
+}
 
 int main()
 {
 	io_context ios;
 	error_code ec;
 
-	address def_gw = get_default_gateway(ios, "", false, ec);
-	if (ec)
-	{
-		std::printf("%s\n", ec.message().c_str());
-		return 1;
-	}
-
-	std::printf("Default gateway: %s\n", def_gw.to_string().c_str());
-
 	std::printf("=========== Routes ===========\n");
 	auto const routes = enum_routes(ios, ec);
 	if (ec)
 	{
-		std::printf("%s\n", ec.message().c_str());
+		std::printf("enum_routes: %s\n", ec.message().c_str());
 		return 1;
 	}
 
-	std::printf("%-18s%-18s%-35s%-7sinterface\n", "destination", "network", "gateway", "mtu");
+	std::printf("%-45s%-45s%-35s%-7s%-18s%s\n", "destination", "network", "gateway", "mtu", "source-hint", "interface");
 
 	for (auto const& r : routes)
 	{
-		std::printf("%-18s%-18s%-35s%-7d%s\n"
+		std::printf("%-45s%-45s%-35s%-7d%-18s%s\n"
 			, r.destination.to_string().c_str()
 			, r.netmask.to_string().c_str()
-			, r.gateway.to_string().c_str()
+			, r.gateway.is_unspecified() ? "-" : r.gateway.to_string().c_str()
 			, r.mtu
+			, r.source_hint.is_unspecified() ? "-" : r.source_hint.to_string().c_str()
 			, r.name);
 	}
 
@@ -78,23 +112,23 @@ int main()
 	auto const net = enum_net_interfaces(ios, ec);
 	if (ec)
 	{
-		std::printf("%s\n", ec.message().c_str());
+		std::printf("enum_ifs: %s\n", ec.message().c_str());
 		return 1;
 	}
 
-	std::printf("%-34s%-45s%-20s%-20s%-34sdescription\n", "address", "netmask", "name", "flags", "default gateway");
+	std::printf("%-34s%-45s%-20s%-20s%-15s%-20s%s\n", "address", "netmask", "name", "gateway", "state", "flags", "description");
 
 	for (auto const& i : net)
 	{
-		address const iface_def_gw = get_default_gateway(ios, i.name, i.interface_address.is_v6(), ec);
-		std::printf("%-34s%-45s%-20s%s%s%-20s%-34s%s %s\n"
+		boost::optional<address> const gateway = get_gateway(i, routes);
+		std::printf("%-34s%-45s%-20s%-20s%-15s%-20s%s %s\n"
 			, i.interface_address.to_string().c_str()
 			, i.netmask.to_string().c_str()
 			, i.name
-			, (i.interface_address.is_multicast()?"multicast ":"")
-			, (is_local(i.interface_address)?"local ":"")
-			, (is_loopback(i.interface_address)?"loopback ":"")
-			, iface_def_gw.to_string().c_str()
-			, i.friendly_name, i.description);
+			, gateway ? gateway->to_string().c_str() : "-"
+			, print_state(i.state)
+			, print_flags(i.flags).c_str()
+			, i.friendly_name
+			, i.description);
 	}
 }

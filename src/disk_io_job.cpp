@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "libtorrent/disk_io_job.hpp"
+#include "libtorrent/aux_/disk_io_job.hpp"
 #include "libtorrent/disk_buffer_holder.hpp"
 
 #include "libtorrent/aux_/disable_warnings_push.hpp"
@@ -39,9 +39,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 namespace libtorrent {
+namespace aux {
 
 	namespace {
-		struct caller_visitor : boost::static_visitor<>
+		struct caller_visitor
 		{
 			explicit caller_visitor(disk_io_job& j)
 				: m_job(j) {}
@@ -49,7 +50,7 @@ namespace libtorrent {
 			void operator()(disk_io_job::read_handler& h) const
 			{
 				if (!h) return;
-				h(std::move(boost::get<disk_buffer_holder>(m_job.argument))
+				h(std::move(std::get<disk_buffer_holder>(m_job.argument))
 					, m_job.error);
 			}
 
@@ -74,7 +75,7 @@ namespace libtorrent {
 			void operator()(disk_io_job::move_handler& h) const
 			{
 				if (!h) return;
-				h(m_job.ret, std::move(boost::get<std::string>(m_job.argument))
+				h(m_job.ret, std::move(std::get<std::string>(m_job.argument))
 					, m_job.error);
 			}
 
@@ -93,7 +94,7 @@ namespace libtorrent {
 			void operator()(disk_io_job::rename_handler& h) const
 			{
 				if (!h) return;
-				h(std::move(boost::get<std::string>(m_job.argument))
+				h(std::move(std::get<std::string>(m_job.argument))
 					, m_job.file_index, m_job.error);
 			}
 
@@ -106,17 +107,13 @@ namespace libtorrent {
 			void operator()(disk_io_job::set_file_prio_handler& h) const
 			{
 				if (!h) return;
-				h(m_job.error, std::move(boost::get<aux::vector<download_priority_t, file_index_t>>(m_job.argument)));
+				h(m_job.error, std::move(std::get<aux::vector<download_priority_t, file_index_t>>(m_job.argument)));
 			}
 
 		private:
 			disk_io_job& m_job;
 		};
 	}
-
-	constexpr disk_job_flags_t disk_io_job::fence;
-	constexpr disk_job_flags_t disk_io_job::in_progress;
-	constexpr disk_job_flags_t disk_io_job::aborted;
 
 	disk_io_job::disk_io_job()
 		: argument(remove_flags_t{})
@@ -128,6 +125,7 @@ namespace libtorrent {
 
 	void disk_io_job::call_callback()
 	{
-		boost::apply_visitor(caller_visitor(*this), callback);
+		std::visit(caller_visitor(*this), callback);
 	}
+}
 }

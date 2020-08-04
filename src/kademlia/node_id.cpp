@@ -37,10 +37,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/kademlia/node_id.hpp"
 #include "libtorrent/kademlia/node_entry.hpp"
 #include "libtorrent/assert.hpp"
-#include "libtorrent/broadcast_socket.hpp" // for is_local et.al
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_local et.al
 #include "libtorrent/random.hpp" // for random
 #include "libtorrent/hasher.hpp" // for hasher
-#include "libtorrent/crc32c.hpp" // for crc32c
+#include "libtorrent/aux_/crc32c.hpp" // for crc32c
 
 namespace libtorrent { namespace dht {
 
@@ -117,12 +117,12 @@ node_id generate_id_impl(address const& ip_, std::uint32_t r)
 	std::uint32_t c;
 	if (num_octets == 4)
 	{
-		c = crc32c_32(*reinterpret_cast<std::uint32_t*>(ip));
+		c = aux::crc32c_32(*reinterpret_cast<std::uint32_t*>(ip));
 	}
 	else
 	{
 		TORRENT_ASSERT(num_octets == 8);
-		c = crc32c(reinterpret_cast<std::uint64_t*>(ip), 1);
+		c = aux::crc32c(reinterpret_cast<std::uint64_t*>(ip), 1);
 	}
 	node_id id;
 
@@ -183,7 +183,7 @@ bool verify_secret_id(node_id const& nid)
 bool verify_id(node_id const& nid, address const& source_ip)
 {
 	// no need to verify local IPs, they would be incorrect anyway
-	if (is_local(source_ip)) return true;
+	if (aux::is_local(source_ip)) return true;
 
 	node_id h = generate_id_impl(source_ip, nid[19]);
 	return nid[0] == h[0] && nid[1] == h[1] && (nid[2] & 0xf8) == (h[2] & 0xf8);

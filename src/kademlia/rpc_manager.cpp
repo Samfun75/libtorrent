@@ -36,9 +36,9 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <libtorrent/config.hpp>
-#include <libtorrent/io.hpp>
+#include <libtorrent/aux_/io_bytes.hpp>
 #include <libtorrent/random.hpp>
-#include <libtorrent/invariant_check.hpp>
+#include <libtorrent/aux_/invariant_check.hpp>
 #include <libtorrent/kademlia/rpc_manager.hpp>
 #include <libtorrent/kademlia/routing_table.hpp>
 #include <libtorrent/kademlia/find_data.hpp>
@@ -54,7 +54,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <libtorrent/socket_io.hpp> // for print_endpoint
 #include <libtorrent/aux_/time.hpp> // for aux::time_now
 #include <libtorrent/aux_/aligned_union.hpp>
-#include <libtorrent/broadcast_socket.hpp> // for is_v6
+#include <libtorrent/aux_/ip_helpers.hpp> // for is_v6
 
 #include <type_traits>
 #include <functional>
@@ -67,17 +67,6 @@ using namespace std::placeholders;
 
 namespace libtorrent { namespace dht {
 
-// TODO: 3 move this into it's own .cpp file
-
-constexpr observer_flags_t observer::flag_queried;
-constexpr observer_flags_t observer::flag_initial;
-constexpr observer_flags_t observer::flag_no_id;
-constexpr observer_flags_t observer::flag_short_timeout;
-constexpr observer_flags_t observer::flag_failed;
-constexpr observer_flags_t observer::flag_ipv6_address;
-constexpr observer_flags_t observer::flag_alive;
-constexpr observer_flags_t observer::flag_done;
-
 dht_observer* observer::get_observer() const
 {
 	return m_algorithm->get_node().observer();
@@ -88,7 +77,7 @@ void observer::set_target(udp::endpoint const& ep)
 	m_sent = clock_type::now();
 
 	m_port = ep.port();
-	if (is_v6(ep))
+	if (aux::is_v6(ep))
 	{
 		flags |= flag_ipv6_address;
 		m_addr.v6 = ep.address().to_v6().to_bytes();
@@ -162,11 +151,11 @@ using observer_storage = aux::aligned_union<1
 rpc_manager::rpc_manager(node_id const& our_id
 	, aux::session_settings const& settings
 	, routing_table& table
-	, aux::listen_socket_handle const& sock
+	, aux::listen_socket_handle sock
 	, socket_manager* sock_man
 	, dht_logger* log)
 	: m_pool_allocator(sizeof(observer_storage), 10)
-	, m_sock(sock)
+	, m_sock(std::move(sock))
 	, m_sock_man(sock_man)
 #ifndef TORRENT_DISABLE_LOGGING
 	, m_log(log)
@@ -262,11 +251,11 @@ bool rpc_manager::incoming(msg const& m, node_id* id)
 	// if we don't have the transaction id in our
 	// request list, ignore the packet
 
-	auto transaction_id = m.message.dict_find_string_value("t");
+	auto const transaction_id = m.message.dict_find_string_value("t");
 	if (transaction_id.empty()) return false;
 
-	auto ptr = transaction_id.begin();
-	int tid = transaction_id.size() != 2 ? -1 : aux::read_uint16(ptr);
+	auto const* ptr = transaction_id.data();
+	int const tid = transaction_id.size() != 2 ? -1 : aux::read_uint16(ptr);
 
 	observer_ptr o;
 	auto range = m_transactions.equal_range(tid);
@@ -324,7 +313,7 @@ bool rpc_manager::incoming(msg const& m, node_id* id)
 					, o->algorithm()->id()
 					, print_endpoint(m.addr).c_str()
 					, err.list_int_value_at(0)
-					, err.list_string_value_at(1).to_string().c_str());
+					, std::string(err.list_string_value_at(1)).c_str());
 			}
 			else
 			{

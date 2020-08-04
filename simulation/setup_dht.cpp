@@ -43,7 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <random>
 #include "libtorrent/socket_io.hpp" // print_endpoint
 #include "libtorrent/random.hpp"
-#include "libtorrent/crc32c.hpp"
+#include "libtorrent/aux_/crc32c.hpp"
 #include "libtorrent/alert_types.hpp" // for dht_routing_bucket
 #include "libtorrent/aux_/listen_socket_handle.hpp"
 
@@ -98,7 +98,7 @@ struct dht_node final : lt::dht::socket_manager
 		, m_ls(sim_listen_socket(tcp::endpoint(m_io_context.get_ips().front(), 6881)))
 		, m_dht(m_ls, this, sett, id_from_addr(m_io_context.get_ips().front())
 			, nullptr, cnt
-			, [](lt::dht::node_id const&, std::string const&) -> lt::dht::node* { return nullptr; }
+			, [](lt::dht::node_id const&, string_view) -> lt::dht::node* { return nullptr; }
 			, *m_dht_storage)
 	{
 		m_dht_storage->update_node_ids({id_from_addr(m_io_context.get_ips().front())});
@@ -315,4 +315,3 @@ void dht_network::stop()
 }
 
 #endif // TORRENT_DISABLE_DHT
-

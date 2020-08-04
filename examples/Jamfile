@@ -9,8 +9,6 @@ if $(BOOST_ROOT)
 	use-project /boost : $(BOOST_ROOT) ;
 }
 
-variant debug-mode : debug : <asserts>on <debug-iterators>on <invariant-checks>full ;
-
 project client_test
 	: requirements
 	<threading>multi <library>/torrent//torrent
@@ -23,8 +21,7 @@ project client_test
 	<toolset>msvc:<cflags>/wd4373
 	: default-build
 	<link>static
-	<cxxstd>14
-	<variant>debug-mode
+	<cxxstd>17
 	;
 
 exe client_test : client_test.cpp print.cpp torrent_view.cpp session_view.cpp ;
@@ -33,6 +30,7 @@ exe simple_client : simple_client.cpp ;
 exe custom_storage : custom_storage.cpp ;
 exe bt-get : bt-get.cpp ;
 exe bt-get2 : bt-get2.cpp ;
+exe bt-get3 : bt-get3.cpp ;
 exe stats_counters : stats_counters.cpp ;
 exe dump_torrent : dump_torrent.cpp ;
 exe torrent2magnet : torrent2magnet.cpp ;

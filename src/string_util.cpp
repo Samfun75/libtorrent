@@ -177,6 +177,7 @@ namespace libtorrent {
 			ret += ':';
 			ret += to_string(i.port).data();
 			if (i.ssl) ret += 's';
+			if (i.local) ret += 'l';
 		}
 
 		return ret;
@@ -214,11 +215,12 @@ namespace libtorrent {
 
 			listen_interface_t iface;
 			iface.ssl = false;
+			iface.local = false;
 
 			string_view port;
 			if (element.front() == '[')
 			{
-				auto const pos = find_first_of(element, ']', 0);
+				auto const pos = element.find_first_of(']', 0);
 				if (pos == string_view::npos
 					|| pos+1 >= element.size()
 					|| element[pos+1] != ':')
@@ -227,15 +229,15 @@ namespace libtorrent {
 					continue;
 				}
 
-				iface.device = strip_string(element.substr(1, pos - 1)).to_string();
+				iface.device = strip_string(element.substr(1, pos - 1));
 
 				port = strip_string(element.substr(pos + 2));
 			}
 			else
 			{
 				// consume device name
-				auto const pos = find_first_of(element, ':', 0);
-				iface.device = strip_string(element.substr(0, pos)).to_string();
+				auto const pos = element.find_first_of(':', 0);
+				iface.device = strip_string(element.substr(0, pos));
 				if (pos == string_view::npos)
 				{
 					err.emplace_back(element);
@@ -271,6 +273,7 @@ namespace libtorrent {
 				switch (c)
 				{
 					case 's': iface.ssl = true; break;
+					case 'l': iface.local = true; break;
 				}
 			}
 
@@ -281,9 +284,9 @@ namespace libtorrent {
 		return out;
 	}
 
-	// this parses the string that's used as the listen_interfaces setting.
-	// it is a comma-separated list of IP or device names with ports. For
-	// example: "eth0:6881,eth1:6881" or "127.0.0.1:6881"
+	// this parses the string that's used as the dht_bootstrap setting.
+	// it is a comma-separated list of IP or hostnames with ports. For
+	// example: "router.bittorrent.com:6881,router.utorrent.com:6881" or "127.0.0.1:6881"
 	void parse_comma_separated_string_port(std::string const& in
 		, std::vector<std::pair<std::string, int>>& out)
 	{
@@ -378,6 +381,12 @@ namespace libtorrent {
 			++pos;
 		}
 		return {last.substr(0, pos), last.substr(pos + found_sep)};
+	}
+
+	void ltrim(std::string& s)
+	{
+		while (!s.empty() && is_space(s.front()))
+			s.erase(s.begin());
 	}
 
 #if TORRENT_USE_I2P

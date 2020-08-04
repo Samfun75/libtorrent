@@ -38,22 +38,21 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 
 #include "libtorrent/peer_connection.hpp"
-#include "libtorrent/web_peer_connection.hpp"
-#include "libtorrent/peer_list.hpp"
+#include "libtorrent/aux_/web_peer_connection.hpp"
+#include "libtorrent/aux_/peer_list.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/aux_/socket_type.hpp"
-#include "libtorrent/invariant_check.hpp"
+#include "libtorrent/aux_/invariant_check.hpp"
 #include "libtorrent/time.hpp"
 #include "libtorrent/aux_/session_interface.hpp"
 #include "libtorrent/piece_picker.hpp"
-#include "libtorrent/broadcast_socket.hpp"
 #include "libtorrent/peer_info.hpp"
 #include "libtorrent/random.hpp"
 #include "libtorrent/extensions.hpp"
 #include "libtorrent/ip_filter.hpp"
 #include "libtorrent/torrent_peer_allocator.hpp"
-#include "libtorrent/ip_voter.hpp" // for external_ip
-#include "libtorrent/broadcast_socket.hpp" // for is_v6
+#include "libtorrent/aux_/ip_voter.hpp" // for external_ip
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_v6
 
 #if TORRENT_USE_ASSERTS
 #include "libtorrent/socket_io.hpp" // for print_endpoint
@@ -86,9 +85,7 @@ namespace {
 	};
 }
 
-namespace libtorrent {
-
-	constexpr erase_peer_flags_t peer_list::force_erase;
+namespace libtorrent::aux {
 
 	peer_list::peer_list(torrent_peer_allocator_interface& alloc)
 		: m_locked_peer(nullptr)
@@ -101,19 +98,21 @@ namespace libtorrent {
 
 	void peer_list::clear()
 	{
-		for (auto const p : m_peers)
+		for (auto* p : m_peers)
 			m_peer_allocator.free_peer_entry(p);
 		m_peers.clear();
+		m_num_connect_candidates = 0;
 	}
 
 	peer_list::~peer_list()
 	{
-		for (auto const p : m_peers)
+		for (auto* p : m_peers)
 			m_peer_allocator.free_peer_entry(p);
 	}
 
 	void peer_list::set_max_failcount(torrent_state* state)
 	{
+		INVARIANT_CHECK;
 		if (state->max_failcount == m_max_failcount) return;
 
 		recalculate_connect_candidates(state);
@@ -176,6 +175,7 @@ namespace libtorrent {
 
 	void peer_list::clear_peer_prio()
 	{
+		INVARIANT_CHECK;
 		for (auto& p : m_peers)
 			p->peer_rank = 0;
 	}
@@ -410,6 +410,7 @@ namespace libtorrent {
 
 	void peer_list::inc_failcount(torrent_peer* p)
 	{
+		INVARIANT_CHECK;
 		// failcount is a 5 bit value
 		if (p->failcount == 31) return;
 
@@ -462,7 +463,7 @@ namespace libtorrent {
 		if (bool(m_finished) != state->is_finished)
 			recalculate_connect_candidates(state);
 
-		external_ip const& external = state->ip;
+		aux::external_ip const& external = state->ip;
 		int external_port = state->port;
 
 		if (m_round_robin >= int(m_peers.size())) m_round_robin = 0;
@@ -707,7 +708,7 @@ namespace libtorrent {
 				);
 			}
 
-			bool const is_v6 = lt::is_v6(c.remote());
+			bool const is_v6 = lt::aux::is_v6(c.remote());
 			torrent_peer* p = m_peer_allocator.allocate_peer_entry(
 				is_v6 ? torrent_peer_allocator_interface::ipv6_peer_type
 				: torrent_peer_allocator_interface::ipv4_peer_type);
@@ -795,9 +796,14 @@ namespace libtorrent {
 #if TORRENT_USE_ASSERTS
 		else
 		{
+			if (true
 #if TORRENT_USE_I2P
-			if (!p->is_i2p_addr)
+			&& !p->is_i2p_addr
 #endif
+#if TORRENT_USE_RTC
+			&& !p->is_rtc_addr
+#endif
+			)
 			{
 				std::pair<iterator, iterator> range = find_peers(p->address());
 				TORRENT_ASSERT(std::distance(range.first, range.second) == 1);
@@ -999,6 +1005,31 @@ namespace libtorrent {
 		return p;
 	}
 #endif // TORRENT_USE_I2P
+
+#if TORRENT_USE_RTC
+	torrent_peer* peer_list::add_rtc_peer(string_view const peer_id
+		, peer_source_flags_t const src, pex_flags_t const flags
+		, torrent_state* state)
+	{
+		TORRENT_ASSERT(is_single_thread());
+		INVARIANT_CHECK;
+
+		iterator const iter = std::lower_bound(m_peers.begin(), m_peers.end()
+				, peer_id, peer_address_compare());
+
+		torrent_peer* p = m_peer_allocator.allocate_peer_entry(
+				torrent_peer_allocator_interface::rtc_peer_type);
+		if (p == nullptr) return nullptr;
+		p = new (p) rtc_peer(peer_id, src);
+
+		if (!insert_peer(p, iter, flags, state))
+		{
+			m_peer_allocator.free_peer_entry(p);
+			return nullptr;
+		}
+		return p;
+    }
+#endif // TORRENT_USE_RTC
 
 	// if this returns non-nullptr, the torrent need to post status update
 	torrent_peer* peer_list::add_peer(tcp::endpoint const& remote
@@ -1303,7 +1334,7 @@ namespace libtorrent {
 
 	// this returns true if lhs is a better connect candidate than rhs
 	bool peer_list::compare_peer(torrent_peer const* lhs, torrent_peer const* rhs
-		, external_ip const& external, int external_port) const
+		, aux::external_ip const& external, int external_port) const
 	{
 		TORRENT_ASSERT(is_single_thread());
 		// prefer peers with lower failcount
@@ -1311,8 +1342,8 @@ namespace libtorrent {
 			return lhs->failcount < rhs->failcount;
 
 		// Local peers should always be tried first
-		bool const lhs_local = is_local(lhs->address());
-		bool const rhs_local = is_local(rhs->address());
+		bool const lhs_local = aux::is_local(lhs->address());
+		bool const rhs_local = aux::is_local(rhs->address());
 		if (lhs_local != rhs_local) return int(lhs_local) > int(rhs_local);
 
 		if (lhs->last_connected != rhs->last_connected)

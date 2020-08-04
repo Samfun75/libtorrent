@@ -50,13 +50,13 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/tracker_manager.hpp"
 #include "libtorrent/http_tracker_connection.hpp"
-#include "libtorrent/http_connection.hpp"
+#include "libtorrent/aux_/http_connection.hpp"
 #include "libtorrent/aux_/escape_string.hpp"
-#include "libtorrent/io.hpp"
+#include "libtorrent/aux_/io_bytes.hpp"
 #include "libtorrent/socket.hpp"
 #include "libtorrent/string_util.hpp" // for is_i2p_url
 #include "libtorrent/aux_/session_settings.hpp"
-#include "libtorrent/resolver_interface.hpp"
+#include "libtorrent/aux_/resolver_interface.hpp"
 #include "libtorrent/ip_filter.hpp"
 #include "libtorrent/aux_/array.hpp"
 
@@ -83,7 +83,7 @@ namespace libtorrent {
 			std::size_t pos = url.find("announce");
 			if (pos == std::string::npos)
 			{
-				tracker_connection::fail(errors::scrape_not_available);
+				fail(errors::scrape_not_available, operation_t::bittorrent);
 				return;
 			}
 			url.replace(pos, 8, "scrape");
@@ -111,7 +111,7 @@ namespace libtorrent {
 
 		if (!(tracker_req().kind & tracker_request::scrape_request))
 		{
-			static aux::array<const char*, 4> const event_string{{"completed", "started", "stopped", "paused"}};
+			static aux::array<const char*, 4> const event_string{{{"completed", "started", "stopped", "paused"}}};
 
 			char str[1024];
 			std::snprintf(str, sizeof(str)
@@ -129,7 +129,7 @@ namespace libtorrent {
 				, escape_string({tracker_req().pid.data(), 20}).c_str()
 				// the i2p tracker seems to verify that the port is not 0,
 				// even though it ignores it otherwise
-				, i2p ? 1 : tracker_req().listen_port
+				, tracker_req().listen_port
 				, tracker_req().uploaded
 				, tracker_req().downloaded
 				, tracker_req().left
@@ -160,7 +160,8 @@ namespace libtorrent {
 			{
 				if (tracker_req().i2pconn->local_endpoint().empty())
 				{
-					fail(errors::no_i2p_endpoint, "Waiting for i2p acceptor from SAM bridge", seconds32(5));
+					fail(errors::no_i2p_endpoint, operation_t::bittorrent
+						, "Waiting for i2p acceptor from SAM bridge", seconds32(5));
 					return;
 				}
 				else
@@ -201,17 +202,18 @@ namespace libtorrent {
 
 		if (!tracker_req().outgoing_socket)
 		{
-			fail(errors::invalid_listen_socket, "outgoing socket was closed");
+			fail(errors::invalid_listen_socket, operation_t::get_interface
+				, "outgoing socket was closed");
 			return;
 		}
 
 		using namespace std::placeholders;
-		m_tracker_connection = std::make_shared<http_connection>(m_ioc, m_man.host_resolver()
+		m_tracker_connection = std::make_shared<aux::http_connection>(m_ioc, m_man.host_resolver()
 			, std::bind(&http_tracker_connection::on_response, shared_from_this(), _1, _2, _3)
 			, true, settings.get_int(settings_pack::max_http_recv_buffer_size)
 			, std::bind(&http_tracker_connection::on_connect, shared_from_this(), _1)
 			, std::bind(&http_tracker_connection::on_filter, shared_from_this(), _1, _2)
-#ifdef TORRENT_SSL_PEERS
+#if TORRENT_USE_SSL
 			, tracker_req().ssl_ctx
 #endif
 			);
@@ -236,8 +238,8 @@ namespace libtorrent {
 			, ps.proxy_tracker_connections ? &ps : nullptr
 			, 5, user_agent, bind_interface()
 			, (tracker_req().event == event_t::stopped
-				? resolver_interface::cache_only : resolver_flags{})
-				| resolver_interface::abort_on_shutdown
+				? aux::resolver_interface::cache_only : aux::resolver_flags{})
+				| aux::resolver_interface::abort_on_shutdown
 #if TORRENT_ABI_VERSION == 1
 			, tracker_req().auth
 #else
@@ -273,9 +275,24 @@ namespace libtorrent {
 	}
 
 	// endpoints is an in-out parameter
-	void http_tracker_connection::on_filter(http_connection& c
+	void http_tracker_connection::on_filter(aux::http_connection& c
 		, std::vector<tcp::endpoint>& endpoints)
 	{
+		// filter all endpoints we cannot reach from this listen socket, which may
+		// be all of them, in which case we should not announce this listen socket
+		// to this tracker
+		auto const ls = bind_socket();
+		endpoints.erase(std::remove_if(endpoints.begin(), endpoints.end()
+			, [&](tcp::endpoint const& ep) { return !ls.can_route(ep.address()); })
+			, endpoints.end());
+
+		if (endpoints.empty())
+		{
+			fail(error_code(boost::system::errc::host_unreachable, system_category())
+				, operation_t::get_interface);
+			return;
+		}
+
 		TORRENT_UNUSED(c);
 		if (!tracker_req().filter) return;
 
@@ -296,10 +313,10 @@ namespace libtorrent {
 		}
 #endif
 		if (endpoints.empty())
-			fail(errors::banned_by_ip_filter);
+			fail(errors::banned_by_ip_filter, operation_t::bittorrent);
 	}
 
-	void http_tracker_connection::on_connect(http_connection& c)
+	void http_tracker_connection::on_connect(aux::http_connection& c)
 	{
 		error_code ec;
 		tcp::endpoint ep = c.socket().remote_endpoint(ec);
@@ -307,26 +324,27 @@ namespace libtorrent {
 	}
 
 	void http_tracker_connection::on_response(error_code const& ec
-		, http_parser const& parser, span<char const> data)
+		, aux::http_parser const& parser, span<char const> data)
 	{
 		// keep this alive
 		std::shared_ptr<http_tracker_connection> me(shared_from_this());
 
 		if (ec && ec != boost::asio::error::eof)
 		{
-			fail(ec);
+			fail(ec, operation_t::sock_read);
 			return;
 		}
 
 		if (!parser.header_finished())
 		{
-			fail(boost::asio::error::eof);
+			fail(boost::asio::error::eof, operation_t::sock_read);
 			return;
 		}
 
 		if (parser.status_code() != 200)
 		{
 			fail(error_code(parser.status_code(), http_category())
+				, operation_t::bittorrent
 				, parser.message().c_str());
 			return;
 		}
@@ -346,12 +364,16 @@ namespace libtorrent {
 		tracker_response resp = parse_tracker_response(data, ecode
 			, tracker_req().kind, tracker_req().info_hash);
 
+		resp.interval = std::max(resp.interval
+				, seconds32{m_man.settings().get_int(settings_pack::min_announce_interval)});
+
 		if (!resp.warning_message.empty())
 			cb->tracker_warning(tracker_req(), resp.warning_message);
 
 		if (ecode)
 		{
-			fail(ecode, resp.failure_reason.c_str()
+			fail(ecode, operation_t::bittorrent
+				, resp.failure_reason.c_str()
 				, resp.interval, resp.min_interval);
 			close();
 			return;
@@ -407,7 +429,7 @@ namespace libtorrent {
 			ec = errors::invalid_tracker_response;
 			return false;
 		}
-		ret.hostname = i.string_value().to_string();
+		ret.hostname = i.string_value();
 
 		// extract port
 		i = info.dict_find_int("port");
@@ -443,20 +465,20 @@ namespace libtorrent {
 
 		bdecode_node const tracker_id = e.dict_find_string("tracker id");
 		if (tracker_id)
-			resp.trackerid = tracker_id.string_value().to_string();
+			resp.trackerid = tracker_id.string_value();
 
 		// parse the response
 		bdecode_node const failure = e.dict_find_string("failure reason");
 		if (failure)
 		{
-			resp.failure_reason = failure.string_value().to_string();
+			resp.failure_reason = failure.string_value();
 			ec = errors::tracker_failure;
 			return resp;
 		}
 
 		bdecode_node const warning = e.dict_find_string("warning message");
 		if (warning)
-			resp.warning_message = warning.string_value().to_string();
+			resp.warning_message = warning.string_value();
 
 		if (flags & tracker_request::scrape_request)
 		{

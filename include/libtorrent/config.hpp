@@ -39,11 +39,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #ifndef TORRENT_CONFIG_HPP_INCLUDED
 #define TORRENT_CONFIG_HPP_INCLUDED
 
+#include <cstddef>
+
 #include "libtorrent/aux_/disable_warnings_push.hpp"
 
 #define _FILE_OFFSET_BITS 64
 
 #include <boost/config.hpp>
+#include <boost/version.hpp>
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 
@@ -92,6 +95,7 @@ POSSIBILITY OF SUCH DAMAGE.
 // (disables some float-dependent APIs)
 #define TORRENT_NO_FPU 1
 #define TORRENT_USE_I2P 0
+#define TORRENT_USE_RTC 0
 #ifndef TORRENT_USE_ICONV
 #define TORRENT_USE_ICONV 0
 #endif
@@ -168,10 +172,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #define TORRENT_USE_ICONV 0
 #else // ANDROID
 
-// posix_fallocate() is available under this condition
-#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
-#define TORRENT_HAS_FALLOCATE 1
-#else
+// posix_fallocate() is not available in glibc under these condition
+#if defined _XOPEN_SOURCE && _XOPEN_SOURCE < 600
+#define TORRENT_HAS_FALLOCATE 0
+#elif defined _POSIX_C_SOURCE && _POSIX_C_SOURCE < 200112L
 #define TORRENT_HAS_FALLOCATE 0
 #endif
 
@@ -186,7 +190,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #elif defined __MINGW32__ || defined __MINGW64__
 #define TORRENT_MINGW
 #define TORRENT_WINDOWS
+#ifndef TORRENT_HAVE_MAP_VIEW_OF_FILE
 #define TORRENT_HAVE_MAP_VIEW_OF_FILE 1
+#endif
 #ifndef TORRENT_USE_ICONV
 # define TORRENT_USE_ICONV 0
 # define TORRENT_USE_LOCALE 1
@@ -470,8 +476,16 @@ POSSIBILITY OF SUCH DAMAGE.
 #define TORRENT_USE_I2P 1
 #endif
 
+#ifndef TORRENT_USE_RTC
+#define TORRENT_USE_RTC 1
+#endif
+
 #ifndef TORRENT_HAS_SYMLINK
 #define TORRENT_HAS_SYMLINK 0
+#endif
+
+#ifndef TORRENT_USE_IFCONF
+#define TORRENT_USE_IFCONF 0
 #endif
 
 // debug builds have asserts enabled by default, release
@@ -566,8 +580,18 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif
 #endif // TORRENT_HAS_ARM_CRC32
 
-#if defined TORRENT_SSL_PEERS && !defined TORRENT_USE_OPENSSL
-#error compiling with TORRENT_SSL_PEERS requires TORRENT_USE_OPENSSL
+#if defined TORRENT_USE_OPENSSL || defined TORRENT_USE_GNUTLS
+#define TORRENT_USE_SSL 1
+#else
+#define TORRENT_USE_SSL 0
+#endif
+
+#if defined TORRENT_SSL_PEERS && !TORRENT_USE_SSL
+#error compiling with TORRENT_SSL_PEERS requires TORRENT_USE_OPENSSL or TORRENT_USE_GNUTLS
+#endif
+
+#if TORRENT_USE_RTC && !TORRENT_USE_SSL
+#error compiling with TORRENT_USE_RTC requires TORRENT_USE_OPENSSL or TORRENT_USE_GNUTLS
 #endif
 
 #include "libtorrent/aux_/export.hpp"

@@ -87,7 +87,6 @@ TORRENT_TEST(magnet)
 	pack.set_int(settings_pack::file_pool_size, 543);
 	pack.set_int(settings_pack::urlseed_wait_retry, 74);
 	pack.set_int(settings_pack::initial_picker_threshold, 351);
-	pack.set_bool(settings_pack::upnp_ignore_nonrouters, true);
 	pack.set_bool(settings_pack::close_redundant_connections, false);
 	pack.set_int(settings_pack::auto_scrape_interval, 235);
 	pack.set_int(settings_pack::auto_scrape_min_interval, 62);
@@ -181,7 +180,7 @@ TORRENT_TEST(magnet)
 		std::printf("3: %s\n", trackers[2].url.c_str());
 	}
 
-	sha1_hash const ih = t.info_hash().v1;
+	sha1_hash const ih = t.info_hashes().v1;
 	TEST_EQUAL(aux::to_hex(ih), "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd");
 
 	p1 = s->abort();
@@ -537,6 +536,14 @@ TORRENT_TEST(invalid_web_seed_escaping)
 	add_torrent_params p = parse_magnet_uri("magnet:?ws=udp%3A%2F%2Ftracker.openjnt.com%\xf7" "A80", ec);
 	TEST_CHECK(ec);
 }
+
+TORRENT_TEST(invalid_trackers)
+{
+	error_code ec;
+	add_torrent_params p = parse_magnet_uri("magnet:?tr=", ec);
+	TEST_CHECK(p.trackers.empty());
+}
+
 
 namespace {
 

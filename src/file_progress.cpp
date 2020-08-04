@@ -34,7 +34,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/piece_picker.hpp"
 #include "libtorrent/file_storage.hpp"
 #include "libtorrent/aux_/file_progress.hpp"
-#include "libtorrent/invariant_check.hpp"
+#include "libtorrent/aux_/invariant_check.hpp"
 
 namespace libtorrent { namespace aux {
 
@@ -137,7 +137,7 @@ namespace libtorrent { namespace aux {
 
 #if TORRENT_USE_INVARIANT_CHECKS
 		// if this assert fires, we've told the file_progress object that we have
-		// a piece twice. That violates its precondition and will cause incorect
+		// a piece twice. That violates its precondition and will cause incorrect
 		// accounting
 		TORRENT_ASSERT(m_have_pieces.get_bit(index) == false);
 		m_have_pieces.set_bit(index);

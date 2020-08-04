@@ -59,6 +59,9 @@ EXPORT lt::address rand_v6();
 EXPORT lt::tcp::endpoint rand_tcp_ep(lt::address(&rand_addr)() = rand_v4);
 EXPORT lt::udp::endpoint rand_udp_ep(lt::address(&rand_addr)() = rand_v4);
 
+// determines if the operating system supports IPv6
+EXPORT bool supports_ipv6();
+
 EXPORT lt::sha1_hash rand_hash();
 EXPORT lt::sha1_hash to_hash(char const* s);
 
@@ -91,8 +94,9 @@ EXPORT lt::file_storage make_file_storage(lt::span<const int> file_sizes
 	, int const piece_size, std::string base_name = "test_dir-");
 EXPORT std::shared_ptr<lt::torrent_info> make_torrent(lt::span<const int> file_sizes
 	, int piece_size);
+EXPORT std::shared_ptr<lt::torrent_info> make_torrent(lt::file_storage& fs);
 EXPORT void create_random_files(std::string const& path, lt::span<const int> file_sizes
-	, libtorrent::file_storage* fs = nullptr);
+	, lt::file_storage* fs = nullptr);
 
 EXPORT std::shared_ptr<lt::torrent_info> create_torrent(std::ostream* file = nullptr
 	, char const* name = "temporary", int piece_size = 16 * 1024, int num_pieces = 13
@@ -113,8 +117,11 @@ setup_transfer(lt::session* ses1, lt::session* ses2
 
 EXPORT int start_web_server(bool ssl = false, bool chunked = false
 	, bool keepalive = true, int min_interval = 30);
-
 EXPORT void stop_web_server();
+
+EXPORT int start_websocket_server(bool ssl = false, int min_interval = 30);
+EXPORT void stop_websocket_server();
+
 EXPORT int start_proxy(int type);
 EXPORT void stop_proxy(int port);
 EXPORT void stop_all_proxies();

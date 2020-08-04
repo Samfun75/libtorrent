@@ -49,7 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <libtorrent/performance_counters.hpp> // for counters
 #include <libtorrent/aux_/time.hpp>
 #include <libtorrent/session_status.hpp>
-#include <libtorrent/broadcast_socket.hpp> // for is_local
+#include <libtorrent/aux_/ip_helpers.hpp> // for is_v6
 
 #ifndef TORRENT_DISABLE_LOGGING
 #include <libtorrent/hex.hpp> // to_hex
@@ -122,14 +122,7 @@ namespace libtorrent { namespace dht {
 
 	void dht_tracker::new_socket(aux::listen_socket_handle const& s)
 	{
-		if (s.is_ssl()) return;
-
 		address const local_address = s.get_local_endpoint().address();
-		// don't try to start dht nodes on non-global IPv6 addresses
-		// with IPv4 the interface might be behind NAT so we can't skip them based on the scope of the local address
-		// and we might not have the external address yet
-		if (local_address.is_v6() && is_local(local_address))
-			return;
 		auto stored_nid = std::find_if(m_state.nids.begin(), m_state.nids.end()
 			, [&](node_ids_t::value_type const& nid) { return nid.first == local_address; });
 		node_id const nid = stored_nid != m_state.nids.end() ? stored_nid->second : node_id();
@@ -162,13 +155,6 @@ namespace libtorrent { namespace dht {
 
 	void dht_tracker::delete_socket(aux::listen_socket_handle const& s)
 	{
-		if (s.is_ssl()) return;
-
-		address local_address = s.get_local_endpoint().address();
-		// since we don't start nodes on local IPv6 interfaces we don't need to remove them either
-		if (local_address.is_v6() && is_local(local_address))
-			return;
-		TORRENT_ASSERT(m_nodes.count(s) == 1);
 		m_nodes.erase(s);
 	}
 
@@ -185,7 +171,7 @@ namespace libtorrent { namespace dht {
 			n.second.connection_timer.expires_after(seconds(1));
 			n.second.connection_timer.async_wait(
 				std::bind(&dht_tracker::connection_timeout, self(), n.first, _1));
-			if (is_v6(n.first.get_local_endpoint()))
+			if (aux::is_v6(n.first.get_local_endpoint()))
 				n.second.dht.bootstrap(concat(m_state.nodes6, m_state.nodes), f);
 			else
 				n.second.dht.bootstrap(concat(m_state.nodes, m_state.nodes6), f);
@@ -228,7 +214,7 @@ namespace libtorrent { namespace dht {
 	std::vector<lt::dht::dht_status> dht_tracker::dht_status() const
 	{
 		std::vector<lt::dht::dht_status> ret;
-		for (auto& n : m_nodes)
+		for (auto const& n : m_nodes)
 			ret.emplace_back(n.second.dht.status());
 		return ret;
 	}
@@ -245,7 +231,7 @@ namespace libtorrent { namespace dht {
 		c.set_value(counters::dht_node_cache, 0);
 		c.set_value(counters::dht_allocated_observers, 0);
 
-		for (auto& n : m_nodes)
+		for (auto const& n : m_nodes)
 			add_dht_counters(n.second.dht, c);
 	}
 
@@ -310,7 +296,7 @@ namespace libtorrent { namespace dht {
 		m_storage.update_node_ids(ids);
 	}
 
-	node* dht_tracker::get_node(node_id const& id, std::string const& family_name)
+	node* dht_tracker::get_node(node_id const& id, string_view  family_name)
 	{
 		TORRENT_UNUSED(id);
 		for (auto& n : m_nodes)
@@ -339,7 +325,8 @@ namespace libtorrent { namespace dht {
 	}
 
 	void dht_tracker::sample_infohashes(udp::endpoint const& ep, sha1_hash const& target
-		, std::function<void(time_duration
+		, std::function<void(node_id
+			, time_duration
 			, int, std::vector<sha1_hash>
 			, std::vector<std::pair<sha1_hash, udp::endpoint>>)> f)
 	{
@@ -516,10 +503,10 @@ namespace libtorrent { namespace dht {
 		m_counters.inc_stats_counter(counters::dht_bytes_in, buf_size);
 		// account for IP and UDP overhead
 		m_counters.inc_stats_counter(counters::recv_ip_overhead_bytes
-			, is_v6(ep) ? 48 : 28);
+			, aux::is_v6(ep) ? 48 : 28);
 		m_counters.inc_stats_counter(counters::dht_messages_in);
 
-		if (m_settings.get_bool(settings_pack::dht_ignore_dark_internet) && is_v4(ep))
+		if (m_settings.get_bool(settings_pack::dht_ignore_dark_internet) && aux::is_v4(ep))
 		{
 			address_v4::bytes_type b = ep.address().to_v4().to_bytes();
 
@@ -619,7 +606,7 @@ namespace {
 	dht_state dht_tracker::state() const
 	{
 		dht_state ret;
-		for (auto& n : m_nodes)
+		for (auto const& n : m_nodes)
 		{
 			// use the local rather than external address because if the user is behind NAT
 			// we won't know the external IP on startup
@@ -663,9 +650,11 @@ namespace {
 	{
 		TORRENT_ASSERT(m_nodes.find(s) != m_nodes.end());
 
-		static char const version_str[] = {'L', 'T'
-			, LIBTORRENT_VERSION_MAJOR, LIBTORRENT_VERSION_MINOR};
-		e["v"] = std::string(version_str, version_str + 4);
+		static_assert(lt::version_minor < 16, "version number not supported by DHT");
+		static_assert(lt::version_tiny < 16, "version number not supported by DHT");
+		static char const ver[] = {'L', 'T'
+			, lt::version_major, (lt::version_minor << 4) | lt::version_tiny};
+		e["v"] = std::string(ver, ver+ 4);
 
 		m_send_buf.clear();
 		bencode(std::back_inserter(m_send_buf), e);
@@ -707,7 +696,7 @@ namespace {
 		m_counters.inc_stats_counter(counters::dht_bytes_out, int(m_send_buf.size()));
 		// account for IP and UDP overhead
 		m_counters.inc_stats_counter(counters::sent_ip_overhead_bytes
-			, is_v6(addr) ? 48 : 28);
+			, aux::is_v6(addr) ? 48 : 28);
 		m_counters.inc_stats_counter(counters::dht_messages_out);
 #ifndef TORRENT_DISABLE_LOGGING
 		m_log->log_packet(dht_logger::outgoing_message, m_send_buf, addr);

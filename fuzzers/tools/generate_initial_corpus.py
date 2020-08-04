@@ -10,7 +10,7 @@ corpus_dirs = [
     'dht_node', 'escape_path', 'escape_string', 'file_storage_add_file',
     'http_parser', 'lazy_bdecode', 'parse_int', 'parse_magnet_uri', 'resume_data',
     'sanitize_path', 'utf8_codepoint', 'utf8_wchar', 'utp',
-    'verify_encoding', 'wchar_utf8', 'peer_conn']
+    'verify_encoding', 'wchar_utf8', 'peer_conn', 'add_torrent']
 
 for p in corpus_dirs:
     try:
@@ -100,17 +100,17 @@ for i in range(101):
 for i in range(-10, 200, 20):
     for j in range(-1, 1):
         for k in range(-1, 1):
-            for l in range(-1, 1):
-                for m in range(-1, 1):
-                    messages.append(add_length(struct.pack('>Biiiii', 21, i, j, k, l, m)))
+            for m in range(-1, 1):
+                for n in range(-1, 1):
+                    messages.append(add_length(struct.pack('>Biiiii', 21, i, j, k, m, n)))
 
 # hash reject
 for i in range(-10, 200, 20):
     for j in range(-1, 1):
         for k in range(-1, 1):
-            for l in range(-1, 1):
-                for m in range(-1, 1):
-                    messages.append(add_length(struct.pack('>Biiiii', 23, i, j, k, l, m)))
+            for m in range(-1, 1):
+                for n in range(-1, 1):
+                    messages.append(add_length(struct.pack('>Biiiii', 23, i, j, k, m, n)))
 
 # hash
 for i in range(-10, 200, 20):

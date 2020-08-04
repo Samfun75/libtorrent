@@ -104,7 +104,9 @@ void bind_peer_info()
         .def_readonly("upload_rate_peak", &peer_info::upload_rate_peak)
         .def_readonly("progress", &peer_info::progress)
         .def_readonly("progress_ppm", &peer_info::progress_ppm)
+#if TORRENT_ABI_VERSION == 1
         .def_readonly("estimated_reciprocation_rate", &peer_info::estimated_reciprocation_rate)
+#endif
         .add_property("local_endpoint", get_local_endpoint)
         ;
 
@@ -133,8 +135,9 @@ void bind_peer_info()
 #endif
 
     // connection_type
-    pi.attr("standard_bittorrent") = (int)peer_info::standard_bittorrent;
-    pi.attr("web_seed") = (int)peer_info::web_seed;
+    pi.attr("standard_bittorrent") = peer_info::standard_bittorrent;
+    pi.attr("web_seed") = peer_info::web_seed;
+    pi.attr("http_seed") = peer_info::http_seed;
 
     // source
     pi.attr("tracker") = peer_info::tracker;

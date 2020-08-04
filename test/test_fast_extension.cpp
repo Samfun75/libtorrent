@@ -39,7 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "test_utils.hpp"
 
 #include "libtorrent/socket.hpp"
-#include "libtorrent/io.hpp"
+#include "libtorrent/aux_/io_bytes.hpp"
 #include "libtorrent/aux_/alloca.hpp" // for use of private TORRENT_ALLOCA
 #include "libtorrent/time.hpp"
 #include "libtorrent/peer_info.hpp"
@@ -232,6 +232,20 @@ void send_have_none(tcp::socket& s)
 	if (ec) TEST_ERROR(ec.message());
 }
 
+void send_dht_port(tcp::socket& s, int port)
+{
+	using namespace lt::aux;
+
+	log("==> dht_port");
+	char msg[] = "\0\0\0\x03\x09\0\0"; // dht_port
+	char* ptr = msg + 5;
+	write_uint16(port, ptr);
+	error_code ec;
+	boost::asio::write(s, boost::asio::buffer(msg, 7)
+		, boost::asio::transfer_all(), ec);
+	if (ec) TEST_ERROR(ec.message());
+}
+
 void send_bitfield(tcp::socket& s, char const* bits)
 {
 	using namespace lt::aux;
@@ -239,7 +253,7 @@ void send_bitfield(tcp::socket& s, char const* bits)
 	int num_pieces = int(strlen(bits));
 	int packet_size = (num_pieces+7)/8 + 5;
 	TORRENT_ALLOCA(msg, char, packet_size);
-	std::fill(msg.begin(), msg.end(), 0);
+	std::fill(msg.begin(), msg.end(), '\0');
 	char* ptr = msg.data();
 	write_int32(packet_size-4, ptr);
 	write_int8(5, ptr);
@@ -424,17 +438,36 @@ entry read_ut_metadata_msg(tcp::socket& s, span<char> recv_buffer)
 std::shared_ptr<torrent_info> setup_peer(tcp::socket& s, io_context& ioc
 	, info_hash_t& ih
 	, std::shared_ptr<lt::session>& ses, bool incoming = true
+	, bool const magnet_link = false, bool const dht = false
 	, torrent_flags_t const flags = torrent_flags_t{}
 	, torrent_handle* th = nullptr)
 {
-	std::shared_ptr<torrent_info> t = ::create_torrent();
-	ih = t->info_hash();
+	std::ofstream out_file;
+	std::ofstream* file = nullptr;
+	if (flags & torrent_flags::seed_mode)
+	{
+		error_code ec;
+		create_directory("tmp1_fast", ec);
+		out_file.open(combine_path("tmp1_fast", "temporary").c_str(), std::ios_base::trunc | std::ios_base::binary);
+		file = &out_file;
+	}
+	else
+	{
+		error_code ec;
+		remove(combine_path("tmp1_fast","temporary").c_str(), ec);
+		if (ec) log("remove(): %s", ec.message().c_str());
+	}
+
+	std::shared_ptr<torrent_info> t = ::create_torrent(file);
+	out_file.close();
+	ih = t->info_hashes();
+
 	settings_pack sett = settings();
 	sett.set_str(settings_pack::listen_interfaces, "0.0.0.0:48900");
 	sett.set_bool(settings_pack::enable_upnp, false);
 	sett.set_bool(settings_pack::enable_natpmp, false);
 	sett.set_bool(settings_pack::enable_lsd, false);
-	sett.set_bool(settings_pack::enable_dht, false);
+	sett.set_bool(settings_pack::enable_dht, dht);
 	sett.set_int(settings_pack::in_enc_policy, settings_pack::pe_disabled);
 	sett.set_int(settings_pack::out_enc_policy, settings_pack::pe_disabled);
 	sett.set_bool(settings_pack::enable_outgoing_utp, false);
@@ -444,18 +477,17 @@ std::shared_ptr<torrent_info> setup_peer(tcp::socket& s, io_context& ioc
 #endif
 	ses.reset(new lt::session(sett));
 
-	error_code ec;
 	add_torrent_params p;
 	p.flags &= ~torrent_flags::paused;
 	p.flags &= ~torrent_flags::auto_managed;
 	p.flags |= flags;
-	p.ti = t;
-	p.save_path = "./tmp1_fast";
+	if (magnet_link)
+		p.info_hash = ih;
+	else
+		p.ti = t;
+	p.save_path = "tmp1_fast";
 
-	remove("./tmp1_fast/temporary", ec);
-	if (ec) log("remove(): %s", ec.message().c_str());
-	ec.clear();
-	torrent_handle ret = ses->add_torrent(p, ec);
+	torrent_handle ret = ses->add_torrent(p);
 	if (th) *th = ret;
 
 	// wait for the torrent to be ready
@@ -463,6 +495,7 @@ std::shared_ptr<torrent_info> setup_peer(tcp::socket& s, io_context& ioc
 
 	if (incoming)
 	{
+		error_code ec;
 		s.connect(ep("127.0.0.1", ses->listen_port()), ec);
 		if (ec) TEST_ERROR(ec.message());
 	}
@@ -818,7 +851,7 @@ TORRENT_TEST(dont_have)
 	io_context ios;
 	tcp::socket s(ios);
 	std::shared_ptr<torrent_info> ti = setup_peer(s, ios, ih, ses, true
-		, torrent_flags_t{}, &th);
+		, false, false, torrent_flags_t{}, &th);
 
 	char recv_buffer[1000];
 	do_handshake(s, ih, recv_buffer);
@@ -932,7 +965,9 @@ TORRENT_TEST(extension_handshake)
 
 	// these extensions are built-in
 	TEST_CHECK(extensions["m"]["lt_donthave"].integer() != 0);
+#ifndef TORRENT_DISABLE_SHARE_MODE
 	TEST_CHECK(extensions["m"]["share_mode"].integer() != 0);
+#endif
 	TEST_CHECK(extensions["m"]["upload_only"].integer() != 0);
 	TEST_CHECK(extensions["m"]["ut_holepunch"].integer() != 0);
 
@@ -1031,7 +1066,7 @@ void have_all_test(bool const incoming)
 	std::shared_ptr<lt::session> ses;
 	io_context ios;
 	tcp::socket s(ios);
-	setup_peer(s, ios, ih, ses, incoming, torrent_flags::seed_mode);
+	setup_peer(s, ios, ih, ses, incoming, false, false, torrent_flags::seed_mode);
 
 	char recv_buffer[1000];
 	do_handshake(s, ih, recv_buffer);
@@ -1068,14 +1103,33 @@ void have_all_test(bool const incoming)
 TORRENT_TEST(outgoing_have_all)
 {
 	std::cout << "\n === test outgoing have-all ===\n" << std::endl;
-	have_all_test(true);
+	have_all_test(false);
 }
 
 TORRENT_TEST(incoming_have_all)
 {
-	std::cout << "\n === test outgoing have-all ===\n" << std::endl;
-	have_all_test(false);
+	std::cout << "\n === test incoming have-all ===\n" << std::endl;
+	have_all_test(true);
 }
 
+TORRENT_TEST(dht_port_no_support)
+{
+	std::cout << "\n === test DHT port (without advertising support) ===\n" << std::endl;
+
+	info_hash_t ih;
+	std::shared_ptr<lt::session> ses;
+	io_context ios;
+	tcp::socket s(ios);
+	setup_peer(s, ios, ih, ses, true, true, true);
+
+	char recv_buffer[1000];
+	do_handshake(s, ih, recv_buffer);
+	send_dht_port(s, 6881);
+	print_session_log(*ses);
+
+	s.close();
+	std::this_thread::sleep_for(lt::milliseconds(500));
+	print_session_log(*ses);
+}
 // TODO: test sending invalid requests (out of bound piece index, offsets and
 // sizes)

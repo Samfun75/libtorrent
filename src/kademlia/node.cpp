@@ -58,6 +58,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/session_settings.hpp"
 #include "libtorrent/alert_types.hpp" // for dht_lookup
 #include "libtorrent/performance_counters.hpp" // for counters
+#include "libtorrent/aux_/ip_helpers.hpp" // for is_v4
 
 #include "libtorrent/kademlia/node.hpp"
 #include "libtorrent/kademlia/dht_observer.hpp"
@@ -120,13 +121,13 @@ node::node(aux::listen_socket_handle const& sock, socket_manager* sock_man
 	, dht_storage_interface& storage)
 	: m_settings(settings)
 	, m_id(calculate_node_id(nid, sock))
-	, m_table(m_id, is_v4(sock.get_local_endpoint()) ? udp::v4() : udp::v6(), 8, settings, observer)
+	, m_table(m_id, aux::is_v4(sock.get_local_endpoint()) ? udp::v4() : udp::v6(), 8, settings, observer)
 	, m_rpc(m_id, m_settings, m_table, sock, sock_man, observer)
 	, m_sock(sock)
 	, m_sock_man(sock_man)
 	, m_get_foreign_node(std::move(get_foreign_node))
 	, m_observer(observer)
-	, m_protocol(map_protocol_to_descriptor(is_v4(sock.get_local_endpoint()) ? udp::v4() : udp::v6()))
+	, m_protocol(map_protocol_to_descriptor(aux::is_v4(sock.get_local_endpoint()) ? udp::v4() : udp::v6()))
 	, m_last_tracker_tick(aux::time_now())
 	, m_last_self_refresh(min_time())
 	, m_counters(cnt)
@@ -273,32 +274,29 @@ void node::incoming(aux::listen_socket_handle const& s, msg const& m)
 		return;
 	}
 
-	const char y = *(y_ent.string_ptr());
+	char const y = *(y_ent.string_ptr());
 
-	bdecode_node ext_ip = m.message.dict_find_string("ip");
+	// we can only ascribe the external IP this node is saying we have to the
+	// listen socket the packet was received on
+	if (s == m_sock)
+	{
+		bdecode_node ext_ip = m.message.dict_find_string("ip");
 
-	// backwards compatibility
-	if (!ext_ip)
-	{
-		bdecode_node const r = m.message.dict_find_dict("r");
-		if (r)
-			ext_ip = r.dict_find_string("ip");
-	}
-
-	if (ext_ip && ext_ip.string_length() >= int(aux::address_size(udp::v6())))
-	{
-		// this node claims we use the wrong node-ID!
-		char const* ptr = ext_ip.string_ptr();
-		if (m_observer != nullptr)
-			m_observer->set_external_address(m_sock, aux::read_v6_address(ptr)
-				, m.addr.address());
-	}
-	else if (ext_ip && ext_ip.string_length() >= int(aux::address_size(udp::v4())))
-	{
-		char const* ptr = ext_ip.string_ptr();
-		if (m_observer != nullptr)
-			m_observer->set_external_address(m_sock, aux::read_v4_address(ptr)
-				, m.addr.address());
+		if (ext_ip && ext_ip.string_length() >= int(aux::address_size(udp::v6())))
+		{
+			// this node claims we use the wrong node-ID!
+			char const* ptr = ext_ip.string_ptr();
+			if (m_observer != nullptr)
+				m_observer->set_external_address(m_sock, aux::read_v6_address(ptr)
+					, m.addr.address());
+		}
+		else if (ext_ip && ext_ip.string_length() >= int(aux::address_size(udp::v4())))
+		{
+			char const* ptr = ext_ip.string_ptr();
+			if (m_observer != nullptr)
+				m_observer->set_external_address(m_sock, aux::read_v4_address(ptr)
+					, m.addr.address());
+		}
 	}
 
 	switch (y)
@@ -316,8 +314,9 @@ void node::incoming(aux::listen_socket_handle const& s, msg const& m)
 			// responds to 'query' messages that it receives.
 			if (m_settings.get_bool(settings_pack::dht_read_only)) break;
 
-			// only respond to requests if they're addressed to this node
-			if (s != m_sock) break;
+			// ignore packets arriving on a different interface than the one we're
+			// associated with
+			if (s != m_sock) return;
 
 			if (!m_sock_man->has_quota())
 			{
@@ -342,7 +341,7 @@ void node::incoming(aux::listen_socket_handle const& s, msg const& m)
 				{
 					m_observer->log(dht_logger::node, "INCOMING ERROR: (%" PRId64 ") %s"
 						, err.list_int_value_at(0)
-						, err.list_string_value_at(1).to_string().c_str());
+						, std::string(err.list_string_value_at(1)).c_str());
 				}
 				else
 				{
@@ -363,7 +362,7 @@ namespace {
 		, node& node, int const listen_port, sha1_hash const& ih, announce_flags_t const flags)
 	{
 #ifndef TORRENT_DISABLE_LOGGING
-		auto logger = node.observer();
+		auto* logger = node.observer();
 		if (logger != nullptr && logger->should_log(dht_logger::node))
 		{
 			logger->log(dht_logger::node, "sending announce_peer [ ih: %s "
@@ -576,7 +575,8 @@ void node::put_item(public_key const& pk, std::string const& salt
 }
 
 void node::sample_infohashes(udp::endpoint const& ep, sha1_hash const& target
-	, std::function<void(time_duration
+	, std::function<void(sha1_hash
+		, time_duration
 		, int, std::vector<sha1_hash>
 		, std::vector<std::pair<sha1_hash, udp::endpoint>>)> f)
 {
@@ -754,7 +754,7 @@ void node::status(session_status& s)
 
 	m_table.status(s);
 	s.dht_total_allocations += m_rpc.num_allocated_observers();
-	for (auto& r : m_running_requests)
+	for (auto const& r : m_running_requests)
 	{
 		s.active_requests.emplace_back();
 		dht_lookup& lookup = s.active_requests.back();
@@ -789,7 +789,7 @@ void node::incoming_request(msg const& m, entry& e)
 {
 	e = entry(entry::dictionary_t);
 	e["y"] = "r";
-	e["t"] = m.message.dict_find_string_value("t").to_string();
+	e["t"] = m.message.dict_find_string_value("t");
 
 	static key_desc_t const top_desc[] = {
 		{"q", bdecode_node::string_t, 0, 0},
@@ -1218,7 +1218,7 @@ void node::write_nodes_entries(sha1_hash const& info_hash
 		bdecode_node wanted = want.list_at(i);
 		if (wanted.type() != bdecode_node::string_t)
 			continue;
-		node* wanted_node = m_get_foreign_node(info_hash, wanted.string_value().to_string());
+		node* wanted_node = m_get_foreign_node(info_hash, wanted.string_value());
 		if (!wanted_node) continue;
 		std::vector<node_entry> const n = wanted_node->m_table.find_node(info_hash, {});
 		r[wanted_node->protocol_nodes_key()] = write_nodes_entry(n);

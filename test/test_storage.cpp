@@ -51,7 +51,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/read_resume_data.hpp"
 #include "libtorrent/write_resume_data.hpp"
-#include "libtorrent/disk_io_job.hpp"
+#include "libtorrent/aux_/disk_io_job.hpp"
 #include "libtorrent/aux_/path.hpp"
 #include "libtorrent/aux_/storage_utils.hpp"
 #include "libtorrent/aux_/session_settings.hpp"
@@ -62,8 +62,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <iostream>
 #include <fstream>
-
-#include <boost/variant/get.hpp>
 
 using namespace std::placeholders;
 using namespace lt;
@@ -79,6 +77,7 @@ namespace aux {
 namespace {
 
 using lt::aux::posix_storage;
+using lt::aux::disk_io_job;
 
 constexpr int piece_size = 16 * 1024 * 16;
 constexpr int half = piece_size / 2;
@@ -522,8 +521,8 @@ void test_check_files(std::string const& test_path
 
 	lt::create_torrent t(fs, piece_size_check);
 	t.set_hash(piece_index_t(0), hasher(piece0).final());
-	t.set_hash(piece_index_t(1), {});
-	t.set_hash(piece_index_t(2), {});
+	t.set_hash(piece_index_t(1), sha1_hash::max());
+	t.set_hash(piece_index_t(2), sha1_hash::max());
 	t.set_hash(piece_index_t(3), hasher(piece2).final());
 
 	create_directory(combine_path(test_path, "temp_storage"), ec);
@@ -826,6 +825,18 @@ TORRENT_TEST(rename_file)
 	p.save_path = ".";
 	error_code ec;
 	torrent_handle h = ses.add_torrent(std::move(p), ec);
+
+	// prevent race conditions of adding pieces while checking
+	lt::torrent_status st = h.status();
+	for (int i = 0; i < 40; ++i)
+	{
+		print_alerts(ses, "ses", true, true);
+		st = h.status();
+		if (st.state != torrent_status::checking_files
+			&& st.state != torrent_status::checking_resume_data)
+			break;
+		std::this_thread::sleep_for(lt::milliseconds(100));
+	}
 
 	// make it a seed
 	std::vector<char> tmp(std::size_t(info->piece_length()));

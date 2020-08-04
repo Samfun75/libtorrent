@@ -92,7 +92,7 @@ protected:
 };
 
 // get the closest node to the id with the given family_name
-using get_foreign_node_t = std::function<node*(node_id const&, std::string const&)>;
+using get_foreign_node_t = std::function<node*(node_id const&, string_view)>;
 
 struct dht_status
 {
@@ -169,7 +169,8 @@ public:
 		, std::function<void(item&)> data_cb);
 
 	void sample_infohashes(udp::endpoint const& ep, sha1_hash const& target
-		, std::function<void(time_duration
+		, std::function<void(sha1_hash
+			, time_duration
 			, int, std::vector<sha1_hash>
 			, std::vector<std::pair<sha1_hash, udp::endpoint>>)> f);
 

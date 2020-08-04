@@ -44,6 +44,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/time.hpp"
 #include "libtorrent/units.hpp"
 #include "libtorrent/flags.hpp"
+#include "libtorrent/aux_/deprecated.hpp"
 
 namespace libtorrent {
 
@@ -61,12 +62,21 @@ namespace libtorrent {
 	// direction
 	using bandwidth_state_flags_t = flags::bitfield_flag<std::uint8_t, struct bandwidth_state_flags_tag>;
 
+	using connection_type_t = flags::bitfield_flag<std::uint8_t, struct connection_type_tag>;
+
 TORRENT_VERSION_NAMESPACE_2
 
 	// holds information and statistics about one peer
 	// that libtorrent is connected to
 	struct TORRENT_EXPORT peer_info
 	{
+		// hidden
+		peer_info();
+		~peer_info();
+		peer_info(peer_info const&);
+		peer_info(peer_info&&);
+		peer_info& operator=(peer_info const&);
+
 		// a string describing the software at the other end of the connection.
 		// In some cases this information is not available, then it will contain
 		// a string that may give away something about which software is running
@@ -93,45 +103,50 @@ TORRENT_VERSION_NAMESPACE_2
 		// the time until all blocks in the request queue will be downloaded
 		time_duration download_queue_time;
 
+#if TORRENT_ABI_VERSION == 1
+		using peer_flags_t = libtorrent::peer_flags_t;
+		using peer_source_flags = libtorrent::peer_source_flags_t;
+#endif
+
 		// **we** are interested in pieces from this peer.
-		static constexpr peer_flags_t interesting = 0_bit;
+		static inline constexpr peer_flags_t interesting = 0_bit;
 
 		// **we** have choked this peer.
-		static constexpr peer_flags_t choked = 1_bit;
+		static inline constexpr peer_flags_t choked = 1_bit;
 
 		// the peer is interested in **us**
-		static constexpr peer_flags_t remote_interested = 2_bit;
+		static inline constexpr peer_flags_t remote_interested = 2_bit;
 
 		// the peer has choked **us**.
-		static constexpr peer_flags_t remote_choked = 3_bit;
+		static inline constexpr peer_flags_t remote_choked = 3_bit;
 
 		// means that this peer supports the
 		// `extension protocol`__.
 		//
 		// __ extension_protocol.html
-		static constexpr peer_flags_t supports_extensions = 4_bit;
+		static inline constexpr peer_flags_t supports_extensions = 4_bit;
 
 		// The connection was initiated by us, the peer has a
 		// listen port open, and that port is the same as in the
 		// address of this peer. If this flag is not set, this
 		// peer connection was opened by this peer connecting to
 		// us.
-		static constexpr peer_flags_t local_connection = 5_bit;
+		static inline constexpr peer_flags_t local_connection = 5_bit;
 
 		// The connection is opened, and waiting for the
 		// handshake. Until the handshake is done, the peer
 		// cannot be identified.
-		static constexpr peer_flags_t handshake = 6_bit;
+		static inline constexpr peer_flags_t handshake = 6_bit;
 
 		// The connection is in a half-open state (i.e. it is
 		// being connected).
-		static constexpr peer_flags_t connecting = 7_bit;
+		static inline constexpr peer_flags_t connecting = 7_bit;
 
 #if TORRENT_ABI_VERSION == 1
 		// The connection is currently queued for a connection
 		// attempt. This may happen if there is a limit set on
 		// the number of half-open TCP connections.
-		static constexpr peer_flags_t queued = 8_bit;
+		TORRENT_DEPRECATED static inline constexpr peer_flags_t queued = 8_bit;
 #endif
 
 		// The peer has participated in a piece that failed the
@@ -139,83 +154,83 @@ TORRENT_VERSION_NAMESPACE_2
 		// only requesting whole pieces from this peer until
 		// it either fails that piece or proves that it doesn't
 		// send bad data.
-		static constexpr peer_flags_t on_parole = 9_bit;
+		static inline constexpr peer_flags_t on_parole = 9_bit;
 
 		// This peer is a seed (it has all the pieces).
-		static constexpr peer_flags_t seed = 10_bit;
+		static inline constexpr peer_flags_t seed = 10_bit;
 
 		// This peer is subject to an optimistic unchoke. It has
 		// been unchoked for a while to see if it might unchoke
 		// us in return an earn an upload/unchoke slot. If it
 		// doesn't within some period of time, it will be choked
 		// and another peer will be optimistically unchoked.
-		static constexpr peer_flags_t optimistic_unchoke = 11_bit;
+		static inline constexpr peer_flags_t optimistic_unchoke = 11_bit;
 
 		// This peer has recently failed to send a block within
 		// the request timeout from when the request was sent.
 		// We're currently picking one block at a time from this
 		// peer.
-		static constexpr peer_flags_t snubbed = 12_bit;
+		static inline constexpr peer_flags_t snubbed = 12_bit;
 
 		// This peer has either explicitly (with an extension)
 		// or implicitly (by becoming a seed) told us that it
 		// will not downloading anything more, regardless of
 		// which pieces we have.
-		static constexpr peer_flags_t upload_only = 13_bit;
+		static inline constexpr peer_flags_t upload_only = 13_bit;
 
 		// This means the last time this peer picket a piece,
 		// it could not pick as many as it wanted because there
 		// were not enough free ones. i.e. all pieces this peer
 		// has were already requested from other peers.
-		static constexpr peer_flags_t endgame_mode = 14_bit;
+		static inline constexpr peer_flags_t endgame_mode = 14_bit;
 
 		// This flag is set if the peer was in holepunch mode
 		// when the connection succeeded. This typically only
 		// happens if both peers are behind a NAT and the peers
 		// connect via the NAT holepunch mechanism.
-		static constexpr peer_flags_t holepunched = 15_bit;
+		static inline constexpr peer_flags_t holepunched = 15_bit;
 
 		// indicates that this socket is running on top of the
 		// I2P transport.
-		static constexpr peer_flags_t i2p_socket = 16_bit;
+		static inline constexpr peer_flags_t i2p_socket = 16_bit;
 
 		// indicates that this socket is a uTP socket
-		static constexpr peer_flags_t utp_socket = 17_bit;
+		static inline constexpr peer_flags_t utp_socket = 17_bit;
 
 		// indicates that this socket is running on top of an SSL
 		// (TLS) channel
-		static constexpr peer_flags_t ssl_socket = 18_bit;
+		static inline constexpr peer_flags_t ssl_socket = 18_bit;
 
 		// this connection is obfuscated with RC4
-		static constexpr peer_flags_t rc4_encrypted = 19_bit;
+		static inline constexpr peer_flags_t rc4_encrypted = 19_bit;
 
 		// the handshake of this connection was obfuscated
 		// with a Diffie-Hellman exchange
-		static constexpr peer_flags_t plaintext_encrypted = 20_bit;
+		static inline constexpr peer_flags_t plaintext_encrypted = 20_bit;
 
 		// tells you in which state the peer is in. It is set to
 		// any combination of the peer_flags_t flags above.
 		peer_flags_t flags;
 
 		// The peer was received from the tracker.
-		static constexpr peer_source_flags_t tracker = 0_bit;
+		static inline constexpr peer_source_flags_t tracker = 0_bit;
 
 		// The peer was received from the kademlia DHT.
-		static constexpr peer_source_flags_t dht = 1_bit;
+		static inline constexpr peer_source_flags_t dht = 1_bit;
 
 		// The peer was received from the peer exchange
 		// extension.
-		static constexpr peer_source_flags_t pex = 2_bit;
+		static inline constexpr peer_source_flags_t pex = 2_bit;
 
 		// The peer was received from the local service
 		// discovery (The peer is on the local network).
-		static constexpr peer_source_flags_t lsd = 3_bit;
+		static inline constexpr peer_source_flags_t lsd = 3_bit;
 
 		// The peer was added from the fast resume data.
-		static constexpr peer_source_flags_t resume_data = 4_bit;
+		static inline constexpr peer_source_flags_t resume_data = 4_bit;
 
 		// we received an incoming connection from this peer
-		static constexpr peer_source_flags_t incoming = 5_bit;
+		static inline constexpr peer_source_flags_t incoming = 5_bit;
 
 		// a combination of flags describing from which sources this peer
 		// was received. A combination of the peer_source_flags_t above.
@@ -304,26 +319,25 @@ TORRENT_VERSION_NAMESPACE_2
 		int downloading_progress;
 		int downloading_total;
 
-		// the kind of connection this is. Used for the connection_type field.
-		enum connection_type_t
-		{
-			// Regular bittorrent connection
-			standard_bittorrent = 0,
+#if TORRENT_ABI_VERSION <= 2
+		using connection_type_t = libtorrent::connection_type_t;
+#endif
+		// Regular bittorrent connection
+		static constexpr connection_type_t standard_bittorrent = 0_bit;
 
 			// HTTP connection using the `BEP 19`_ protocol
-			web_seed = 1,
+		static constexpr connection_type_t web_seed = 1_bit;
 
 			// HTTP connection using the `BEP 17`_ protocol
-			http_seed = 2
-		};
+		static constexpr connection_type_t http_seed = 2_bit;
 
 		// the kind of connection this peer uses. See connection_type_t.
-		int connection_type;
+		connection_type_t connection_type;
 
 #if TORRENT_ABI_VERSION == 1
 		// an estimate of the rate this peer is downloading at, in
 		// bytes per second.
-		int remote_dl_rate;
+		TORRENT_DEPRECATED int remote_dl_rate;
 #endif
 
 		// the number of bytes this peer has pending in the disk-io thread.
@@ -362,11 +376,13 @@ TORRENT_VERSION_NAMESPACE_2
 		// (parts per million).
 		int progress_ppm;
 
+#if TORRENT_ABI_VERSION == 1
 		// this is an estimation of the upload rate, to this peer, where it will
 		// unchoke us. This is a coarse estimation based on the rate at which
 		// we sent right before we were choked. This is primarily used for the
 		// bittyrant choking algorithm.
-		int estimated_reciprocation_rate;
+		TORRENT_DEPRECATED int estimated_reciprocation_rate;
+#endif
 
 		// the IP-address to this peer. The type is an asio endpoint. For
 		// more info, see the asio_ documentation.
@@ -397,27 +413,28 @@ TORRENT_VERSION_NAMESPACE_2
 		static constexpr bandwidth_state_flags_t bw_disk = 4_bit;
 
 		// bitmasks indicating what state this peer
-		// is in with regards to sending and receiving data. The states are declared in the
-		// bw_state enum.
+		// is in with regards to sending and receiving data. The states are
+		// defined as independent flags of type bandwidth_state_flags_t, in this
+		// class.
 		bandwidth_state_flags_t read_state;
 		bandwidth_state_flags_t write_state;
 
 #if TORRENT_ABI_VERSION == 1
-		static constexpr bandwidth_state_flags_t bw_torrent = bw_limit;
-		static constexpr bandwidth_state_flags_t bw_global = bw_limit;
+		TORRENT_DEPRECATED static constexpr bandwidth_state_flags_t bw_torrent = bw_limit;
+		TORRENT_DEPRECATED static constexpr bandwidth_state_flags_t bw_global = bw_limit;
 
 		// the number of bytes per second we are allowed to send to or receive
 		// from this peer. It may be -1 if there's no local limit on the peer.
 		// The global limit and the torrent limit may also be enforced.
-		int upload_limit;
-		int download_limit;
+		TORRENT_DEPRECATED int upload_limit;
+		TORRENT_DEPRECATED int download_limit;
 
 		// a measurement of the balancing of free download (that we get) and free
 		// upload that we give. Every peer gets a certain amount of free upload,
 		// but this member says how much *extra* free upload this peer has got.
 		// If it is a negative number it means that this was a peer from which we
 		// have got this amount of free download.
-		std::int64_t load_balancing;
+		TORRENT_DEPRECATED std::int64_t load_balancing;
 #endif
 	};
 

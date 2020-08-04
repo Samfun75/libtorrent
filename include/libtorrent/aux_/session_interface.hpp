@@ -49,41 +49,33 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/link.hpp" // for torrent_list_index_t
 #include "libtorrent/info_hash.hpp"
 #include "libtorrent/aux_/socket_type.hpp"
+#include "libtorrent/ssl.hpp"
 
 #include <functional>
 #include <memory>
 
-#ifdef TORRENT_SSL_PEERS
-// there is no forward declaration header for asio
-namespace boost {
-namespace asio {
-namespace ssl {
-	class context;
-}
-}
-}
-#endif
-
 namespace libtorrent {
 
 	struct peer_connection;
-	struct torrent;
 	struct peer_class_set;
-	struct bandwidth_channel;
-	struct bandwidth_manager;
 	struct peer_class_pool;
 	struct disk_observer;
 	struct torrent_peer;
-	struct alert_manager;
 	struct disk_interface;
 	struct tracker_request;
 	struct request_callback;
-	struct external_ip;
 	struct torrent_peer_allocator_interface;
 	struct counters;
-	struct resolver_interface;
 
-namespace aux { struct utp_socket_manager; }
+namespace aux {
+	struct utp_socket_manager;
+	struct bandwidth_channel;
+	struct bandwidth_manager;
+	struct resolver_interface;
+	struct alert_manager;
+	struct torrent;
+	struct external_ip;
+}
 
 	// hidden
 	using queue_position_t = aux::strong_typedef<int, struct queue_position_tag>;
@@ -144,17 +136,15 @@ namespace aux {
 
 		// the logic in ip_voter relies on more reliable sources are represented
 		// by more significant bits
-		static constexpr ip_source_t source_dht = 1_bit;
-		static constexpr ip_source_t source_peer = 2_bit;
-		static constexpr ip_source_t source_tracker = 3_bit;
-		static constexpr ip_source_t source_router = 4_bit;
+		static inline constexpr ip_source_t source_dht = 1_bit;
+		static inline constexpr ip_source_t source_peer = 2_bit;
+		static inline constexpr ip_source_t source_tracker = 3_bit;
+		static inline constexpr ip_source_t source_router = 4_bit;
 
-		virtual void set_external_address(address const& ip
-			, ip_source_t source_type, address const& source) = 0;
 		virtual void set_external_address(tcp::endpoint const& local_endpoint
 			, address const& ip
 			, ip_source_t source_type, address const& source) = 0;
-		virtual external_ip external_address() const = 0;
+		virtual aux::external_ip external_address() const = 0;
 
 		virtual disk_interface& disk_thread() = 0;
 
@@ -162,7 +152,7 @@ namespace aux {
 
 		virtual torrent_peer_allocator_interface& get_peer_allocator() = 0;
 		virtual io_context& get_context() = 0;
-		virtual resolver_interface& get_resolver() = 0;
+		virtual aux::resolver_interface& get_resolver() = 0;
 
 		virtual bool has_connection(peer_connection* p) const = 0;
 		virtual void insert_peer(std::shared_ptr<peer_connection> const& c) = 0;
@@ -206,7 +196,6 @@ namespace aux {
 		virtual void for_each_listen_socket(std::function<void(aux::listen_socket_handle const&)> f) = 0;
 
 		// ask for which interface and port to bind outgoing peer connections on
-		virtual bool has_udp_outgoing_sockets() const = 0;
 		virtual tcp::endpoint bind_outgoing_socket(socket_type& s, address const&
 			remote_address, error_code& ec) const = 0;
 		virtual bool verify_bound_address(address const& addr, bool utp
@@ -254,36 +243,36 @@ namespace aux {
 
 		// this is the set of (subscribed) torrents that have changed
 		// their states since the last time the user requested updates.
-		static constexpr torrent_list_index_t torrent_state_updates{0};
+		static inline constexpr torrent_list_index_t torrent_state_updates{0};
 
 			// all torrents that want to be ticked every second
-		static constexpr torrent_list_index_t torrent_want_tick{1};
+		static inline constexpr torrent_list_index_t torrent_want_tick{1};
 
 			// all torrents that want more peers and are still downloading
 			// these typically have higher priority when connecting peers
-		static constexpr torrent_list_index_t torrent_want_peers_download{2};
+		static inline constexpr torrent_list_index_t torrent_want_peers_download{2};
 
 			// all torrents that want more peers and are finished downloading
-		static constexpr torrent_list_index_t torrent_want_peers_finished{3};
+		static inline constexpr torrent_list_index_t torrent_want_peers_finished{3};
 
 			// torrents that want auto-scrape (only paused auto-managed ones)
-		static constexpr torrent_list_index_t torrent_want_scrape{4};
+		static inline constexpr torrent_list_index_t torrent_want_scrape{4};
 
 			// auto-managed torrents by state. Only these torrents are considered
 			// when recalculating auto-managed torrents. started auto managed
 			// torrents that are inactive are not part of these lists, because they
 			// are not considered for auto managing (they are left started
 			// unconditionally)
-		static constexpr torrent_list_index_t torrent_downloading_auto_managed{5};
-		static constexpr torrent_list_index_t torrent_seeding_auto_managed{6};
-		static constexpr torrent_list_index_t torrent_checking_auto_managed{7};
+		static inline constexpr torrent_list_index_t torrent_downloading_auto_managed{5};
+		static inline constexpr torrent_list_index_t torrent_seeding_auto_managed{6};
+		static inline constexpr torrent_list_index_t torrent_checking_auto_managed{7};
 
 		static constexpr std::size_t num_torrent_lists = 8;
 
 		virtual aux::vector<torrent*>& torrent_list(torrent_list_index_t i) = 0;
 
 		virtual bool has_lsd() const = 0;
-		virtual void announce_lsd(sha1_hash const& ih, int port, bool broadcast = false) = 0;
+		virtual void announce_lsd(sha1_hash const& ih, int port) = 0;
 		virtual libtorrent::aux::utp_socket_manager* utp_socket_manager() = 0;
 		virtual void inc_boost_connections() = 0;
 		virtual std::vector<block_info>& block_info_storage() = 0;
@@ -291,8 +280,8 @@ namespace aux {
 #ifdef TORRENT_SSL_PEERS
 		virtual libtorrent::aux::utp_socket_manager* ssl_utp_socket_manager() = 0;
 #endif
-#ifdef TORRENT_USE_OPENSSL
-		virtual boost::asio::ssl::context* ssl_ctx() = 0 ;
+#if TORRENT_USE_SSL
+		virtual ssl::context* ssl_ctx() = 0 ;
 #endif
 
 #if !defined TORRENT_DISABLE_ENCRYPTION

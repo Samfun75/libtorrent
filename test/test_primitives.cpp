@@ -32,14 +32,15 @@ POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "libtorrent/broadcast_socket.hpp"
+#include "libtorrent/entry.hpp"
 #include "libtorrent/socket_io.hpp" // for print_endpoint
-#include "libtorrent/announce_entry.hpp"
+#include "libtorrent/aux_/announce_entry.hpp"
 #include "libtorrent/hex.hpp" // from_hex
 #include "libtorrent/fingerprint.hpp"
+#include "libtorrent/client_data.hpp"
 
 #include "test.hpp"
-#include "setup_transfer.hpp"
+#include "setup_transfer.hpp"  // for supports_ipv6
 
 using namespace lt;
 
@@ -47,7 +48,7 @@ TORRENT_TEST(retry_interval)
 {
 	// make sure the retry interval keeps growing
 	// on failing announces
-	announce_entry ae("dummy");
+	aux::announce_entry ae("dummy");
 	ae.endpoints.emplace_back(aux::listen_socket_handle(), false);
 	int last = 0;
 	auto const tracker_backoff = 250;
@@ -190,3 +191,56 @@ TORRENT_TEST(error_condition)
 	TEST_CHECK(ec == boost::system::errc::no_such_file_or_directory);
 }
 
+TORRENT_TEST(client_data_assign)
+{
+	client_data_t v;
+	TEST_CHECK(v.get<int>() == nullptr);
+	int a = 1337;
+	v = &a;
+	TEST_CHECK(v.get<int>() == &a);
+	TEST_CHECK(*v.get<int>() == 1337);
+	TEST_CHECK(v.get<int const>() == nullptr);
+	TEST_CHECK(v.get<int volatile>() == nullptr);
+	TEST_CHECK(v.get<int const volatile>() == nullptr);
+	TEST_CHECK(v.get<float>() == nullptr);
+
+	TEST_CHECK(static_cast<int*>(v) == &a);
+	TEST_CHECK(*static_cast<int*>(v) == 1337);
+	TEST_CHECK(static_cast<int const*>(v) == nullptr);
+	TEST_CHECK(static_cast<int volatile*>(v) == nullptr);
+	TEST_CHECK(static_cast<int const volatile*>(v) == nullptr);
+	TEST_CHECK(static_cast<float*>(v) == nullptr);
+
+	float b = 42.f;
+	v = &b;
+	TEST_CHECK(v.get<float>() == &b);
+	TEST_CHECK(*v.get<float>() == 42.f);
+	TEST_CHECK(v.get<float const>() == nullptr);
+	TEST_CHECK(v.get<float volatile>() == nullptr);
+	TEST_CHECK(v.get<float const volatile>() == nullptr);
+	TEST_CHECK(v.get<int>() == nullptr);
+
+	TEST_CHECK(static_cast<float*>(v) == &b);
+	TEST_CHECK(*static_cast<float*>(v) == 42.f);
+	TEST_CHECK(static_cast<float const*>(v) == nullptr);
+	TEST_CHECK(static_cast<float volatile*>(v) == nullptr);
+	TEST_CHECK(static_cast<float const volatile*>(v) == nullptr);
+	TEST_CHECK(static_cast<int*>(v) == nullptr);
+}
+
+TORRENT_TEST(client_data_initialize)
+{
+	int a = 1337;
+	client_data_t v(&a);
+	TEST_CHECK(v.get<int>() == &a);
+	TEST_CHECK(*v.get<int>() == 1337);
+}
+
+TORRENT_TEST(announce_endpoint_initialize)
+{
+	// announce_endpoint has an array of announce_infohash and
+	// announce_infohash has the constructor marked TORRENT_UNEXPORT
+	// it's important that announce_endpoint provides a constructor
+	announce_endpoint ae;
+	TEST_EQUAL(ae.enabled, true);
+}

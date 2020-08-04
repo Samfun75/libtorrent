@@ -208,17 +208,17 @@ namespace libtorrent {
 		return ret;
 	}
 
-	std::string maybe_url_encode(std::string const& url)
+	std::string maybe_url_encode(string_view url)
 	{
 		std::string protocol, host, auth, path;
 		int port;
 		error_code ec;
 		std::tie(protocol, auth, host, port, path) = parse_url_components(url, ec);
-		if (ec) return url;
+		if (ec) return std::string(url);
 
 		// first figure out if this url contains unencoded characters
 		if (!need_encoding(path.c_str(), int(path.size())))
-			return url;
+			return std::string(url);
 
 		std::string msg;
 		std::string escaped_path { escape_path(path) };
@@ -552,8 +552,8 @@ namespace {
 		std::wstring ws = libtorrent::utf8_wchar(s);
 		std::string ret;
 		ret.resize(ws.size() * 4 + 1);
-		std::size_t size = WideCharToMultiByte(CP_ACP, 0, ws.c_str(), -1, &ret[0], int(ret.size()), nullptr, nullptr);
-		if (size == std::size_t(-1)) return s;
+		int size = WideCharToMultiByte(CP_ACP, 0, ws.c_str(), -1, &ret[0], int(ret.size()), nullptr, nullptr);
+		if (size < 0) return s;
 		if (size != 0 && ret[size - 1] == '\0') --size;
 		ret.resize(size);
 		return ret;
@@ -563,8 +563,8 @@ namespace {
 	{
 		std::wstring ws;
 		ws.resize(s.size() + 1);
-		std::size_t size = MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, &ws[0], int(ws.size()));
-		if (size == std::size_t(-1)) return s;
+		int size = MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, &ws[0], int(ws.size()));
+		if (size < 0) return s;
 		if (size != 0 && ws[size - 1] == '\0') --size;
 		ws.resize(size);
 		return libtorrent::wchar_utf8(ws);

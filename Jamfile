@@ -46,6 +46,7 @@ else
 }
 
 use-project /try_signal : ./deps/try_signal ;
+use-project /libdatachannel : ./deps/libdatachannel ;
 
 VERSION = 2.0.0 ;
 
@@ -79,9 +80,18 @@ rule linking ( properties * )
 			result += <library>dl ;
 		}
 	}
+	else if <crypto>gnutls in $(properties)
+	{
+		result += <library>./deps/asio-gnutls//asio-gnutls ;
+		result += <library>gnutls/<link>shared ;
+	}
 	else if <crypto>libcrypto in $(properties)
 	{
 		result += <library>crypto ;
+		if <target-os>linux in $(properties)
+		{
+			result += <library>dl ;
+		}
 	}
 	else if <crypto>wolfssl in $(properties)
 	{
@@ -201,10 +211,18 @@ rule linking ( properties * )
 	if <link>shared in $(properties)
 	{
 		result += <library>/try_signal//try_signal/<link>static/<fpic>on ;
+		if <webtorrent>on in $(properties)
+		{
+			result += <library>/libdatachannel//libdatachannel/<link>static/<fpic>on ;
+		}
 	}
 	else
 	{
 		result += <library>/try_signal//try_signal/<link>static ;
+		if <webtorrent>on in $(properties)
+		{
+			result += <library>/libdatachannel//libdatachannel/<link>static ;
+		}
 	}
 
 	return $(result) ;
@@ -225,6 +243,7 @@ rule warnings ( properties * )
 		result += <cflags>-Weverything ;
 		result += <cflags>-Wno-documentation ;
 		result += <cxxflags>-Wno-c++98-compat-pedantic ;
+		result += <cxxflags>-Wno-c++11-compat-pedantic ;
 		result += <cflags>-Wno-padded ;
 		result += <cflags>-Wno-global-constructors ;
 # this warns on any global static object, which are used for error_category
@@ -236,6 +255,9 @@ rule warnings ( properties * )
 
 		result += <cflags>-Wno-return-std-move-in-c++11 ;
 		result += <cflags>-Wno-unknown-warning-option ;
+
+# libtorrent uses alloca() carefully
+		result += <cflags>-Wno-alloca ;
 	}
 
 	if <toolset>gcc in $(properties)
@@ -246,7 +268,7 @@ rule warnings ( properties * )
 #		result += <cflags>-Wmisleading-indentation ;
 		result += <cflags>-Wparentheses ;
 		result += <cflags>-Wvla ;
-		result += <cxxflags>-Wc++11-compat ;
+		result += <cxxflags>-Wno-c++11-compat ;
 		result += <cflags>-Wno-format-zero-length ;
 		result += <cflags>-Wno-noexcept-type ;
 	}
@@ -288,9 +310,9 @@ rule building ( properties * )
 	}
 
 	local VERSION = [ feature.get-values <cxxstd> : $(properties) ] ;
-	if ! $(VERSION) || $(VERSION) < 14
+	if ! $(VERSION) || $(VERSION) < 17
 	{
-		ECHO "libtorrent requires at least C++14. Specify <cxxstd>14 or higher" ;
+		ECHO "libtorrent requires at least C++17. Specify <cxxstd>17 or higher" ;
 		result += <build>no ;
 	}
 
@@ -298,6 +320,12 @@ rule building ( properties * )
 	{
 		# allow larger .obj files (with more sections)
 		result += <cflags>/bigobj ;
+	}
+
+	if <toolset>gcc in $(properties) && <target-os>windows in $(properties)
+	{
+		# allow larger object files in mingw
+		result += <cflags>-Wa,-mbig-obj ;
 	}
 
 	if ( <asserts>production in $(properties)
@@ -400,6 +428,42 @@ rule openssl-include-path ( properties * )
 	return $(result) ;
 }
 
+# the search path to pick up the gnutls libraries from. This is the <search>
+# property of those libraries
+rule gnutls-lib-path ( properties * )
+{
+	local GNUTLS_LIB = [ feature.get-values <gnutls-lib> : $(properties) ] ;
+
+	if <target-os>darwin in $(properties) && $(GNUTLS_LIB) = ""
+	{
+		# on macOS, default to pick up gnutls from the homebrew installation
+		# brew install gnutls
+		GNUTLS_LIB = /usr/local/opt/gnutls/lib ;
+	}
+
+	local result ;
+	result += <search>$(GNUTLS_LIB) ;
+	return $(result) ;
+}
+
+# the include path to pick up gnutls headers from. This is the
+# usage-requirement for the gnutls-related libraries
+rule gnutls-include-path ( properties * )
+{
+	local GNUTLS_INCLUDE = [ feature.get-values <gnutls-include> : $(properties) ] ;
+
+	if <target-os>darwin in $(properties) && $(GNUTLS_INCLUDE) = ""
+	{
+		# on macOS, default to pick up gnutls from the homebrew installation
+		# brew install gnutls
+		GNUTLS_INCLUDE = /usr/local/opt/gnutls/include ;
+	}
+
+	local result ;
+	result += <include>$(GNUTLS_INCLUDE) ;
+	return $(result) ;
+}
+
 # the search path to pick up the wolfssl libraries from. This is the <search>
 # property of those libraries
 rule wolfssl-lib-path ( properties * )
@@ -437,70 +501,37 @@ rule wolfssl-include-path ( properties * )
 
 path-constant blacklist-file : tools/sanitizer-blacklist.txt ;
 
-rule sanitizer-options ( properties * )
-{
-	local result ;
-	if <sanitize>on in $(properties)
-	{
-		local sanitizers ;
-		local extra ;
-		local flags ;
-   
-		# sanitize is a clang and GCC feature
-		if <toolset>clang in $(properties)
-		{
-			local version = [ feature.get-values <toolset-clang:version> : $(properties) ] ;
-			# implicit-conversion sanitizer was added in clang-7
-			if $(version) >= 7.0 {
-				sanitizers += address,undefined,leak,implicit-conversion ;
-			}
-			else {
-				sanitizers += address,undefined,leak ;
-			}
-			extra = <cflags>-fsanitize-blacklist=$(blacklist-file) ;
-			flags = -fsanitize=$(sanitizers) -fno-sanitize-recover=all ;
-		}
-		# sanitizers are not available on windows (mingw)
-		else if <toolset>gcc in $(properties) && ! <target-os>windows in $(properties)
-		{
-			local version = [ feature.get-values <toolset-gcc:version> : $(properties) ] ;
-			if $(version) >= 7.0 {
-				extra = <cflags>-fsanitize-address-use-after-scope ;
-			}
-			if $(version) >= 5.0 {
-				sanitizers = address,undefined,leak ;
-				flags = -fsanitize=$(sanitizers) -fno-sanitize-recover=all ;
-			}
-		}
-		else if <toolset>darwin in $(properties)
-		{
-			# apple's compiler is typically an old version of clang
-			sanitizers = address,undefined ;
-			flags = -fsanitize=$(sanitizers) -fno-sanitize-recover=all ;
-		}
-
-		result = <cflags>$(flags) <linkflags>$(flags) $(extra) ;
-	}
-	return $(result) ;
-}
-
 feature openssl-lib : : free path ;
 feature openssl-include : : free path ;
+
+feature gnutls-lib : : free path ;
+feature gnutls-include : : free path ;
 
 feature wolfssl-lib : : free path ;
 feature wolfssl-include : : free path ;
 
-feature sanitize : off rtc on : composite propagated link-incompatible ;
-
-# RTC (runtime check) is an msvc feature
-feature.compose <sanitize>rtc : <cflags>/RTCc <cflags>/RTCsu ;
-
 feature test-coverage : off on : composite propagated link-incompatible ;
 feature.compose <test-coverage>on : <cflags>--coverage <linkflags>--coverage ;
+
+feature predictive-pieces : on off : composite propagated ;
+feature.compose <predictive-pieces>off : <define>TORRENT_DISABLE_PREDICTIVE_PIECES ;
+
+feature share-mode : on off : composite propagated ;
+feature.compose <share-mode>off : <define>TORRENT_DISABLE_SHARE_MODE ;
+
+feature streaming : on off : composite propagated ;
+feature.compose <streaming>off : <define>TORRENT_DISABLE_STREAMING ;
+
+feature super-seeding : on off : composite propagated ;
+feature.compose <super-seeding>off : <define>TORRENT_DISABLE_SUPERSEEDING ;
 
 feature i2p : on off : composite propagated ;
 feature.compose <i2p>on : <define>TORRENT_USE_I2P=1 ;
 feature.compose <i2p>off : <define>TORRENT_USE_I2P=0 ;
+
+feature webtorrent : off on : composite propagated ;
+feature.compose <webtorrent>on : <define>TORRENT_USE_RTC=1 ;
+feature.compose <webtorrent>off : <define>TORRENT_USE_RTC=0 ;
 
 feature iconv : auto on off : composite propagated ;
 feature.compose <iconv>on : <define>TORRENT_USE_ICONV=1 ;
@@ -511,9 +542,10 @@ feature.compose <asserts>on : <define>TORRENT_USE_ASSERTS=1 ;
 feature.compose <asserts>production : <define>TORRENT_USE_ASSERTS=1 <define>TORRENT_PRODUCTION_ASSERTS=1 ;
 feature.compose <asserts>system : <define>TORRENT_USE_ASSERTS=1 <define>TORRENT_USE_SYSTEM_ASSERTS=1 ;
 
-feature windows-version : vista win7 xp : composite propagated ;
+feature windows-version : vista win7 win10 xp : composite propagated ;
 feature.compose <windows-version>vista : <define>_WIN32_WINNT=0x0600 ;
 feature.compose <windows-version>win7 : <define>_WIN32_WINNT=0x0601 ;
+feature.compose <windows-version>win10 : <define>_WIN32_WINNT=0x0A00 ;
 feature.compose <windows-version>xp : <define>_WIN32_WINNT=0x0501 ;
 
 feature extensions : on off : composite propagated link-incompatible ;
@@ -526,7 +558,7 @@ feature picker-debugging : off on : composite propagated link-incompatible ;
 feature.compose <picker-debugging>on : <define>TORRENT_DEBUG_REFCOUNTS ;
 
 feature mmap-disk-io : on off : composite propagated ;
-feature.compose <mmap-disk-io>off : <define>TORRENT_HAVE_MMAP=0 ;
+feature.compose <mmap-disk-io>off : <define>TORRENT_HAVE_MMAP=0 <define>TORRENT_HAVE_MAP_VIEW_OF_FILE=0 ;
 
 feature simulator : off on : composite propagated link-incompatible ;
 feature.compose <simulator>on : <define>TORRENT_BUILD_SIMULATOR ;
@@ -553,12 +585,13 @@ feature.compose <encryption>off : <define>TORRENT_DISABLE_ENCRYPTION ;
 feature mutable-torrents : on off : composite propagated link-incompatible ;
 feature.compose <mutable-torrents>off : <define>TORRENT_DISABLE_MUTABLE_TORRENTS ;
 
-feature crypto : built-in openssl wolfssl libcrypto gcrypt : composite propagated ;
+feature crypto : built-in openssl wolfssl gnutls libcrypto gcrypt : composite propagated ;
 feature.compose <crypto>openssl
 	: <define>TORRENT_USE_LIBCRYPTO
 	<define>TORRENT_USE_OPENSSL
 	<define>TORRENT_SSL_PEERS
-	<define>OPENSSL_NO_SSL2 ;
+	<define>OPENSSL_NO_SSL2
+	<gnutls>off ;
 feature.compose <crypto>wolfssl
 	: <define>TORRENT_USE_WOLFSSL
 	<define>TORRENT_USE_LIBCRYPTO
@@ -568,7 +601,12 @@ feature.compose <crypto>wolfssl
 	<define>OPENSSL_ALL
 	<define>WOLFSSL_SHA512
 	<define>WOLFSSL_NGINX
-	<define>WC_NO_HARDEN ;
+	<define>WC_NO_HARDEN
+	<gnutls>off ;
+feature.compose <crypto>gnutls
+	: <define>TORRENT_USE_GNUTLS
+	<define>TORRENT_SSL_PEERS
+	<gnutls>on ;
 feature.compose <crypto>libcrypto : <define>TORRENT_USE_LIBCRYPTO ;
 feature.compose <crypto>gcrypt : <define>TORRENT_USE_LIBGCRYPT ;
 
@@ -602,33 +640,6 @@ feature export-extra : off on : composite propagated ;
 # symbol table reasonably small
 feature.compose <export-extra>on : <define>TORRENT_EXPORT_EXTRA ;
 
-
-# this is a trick to get filename paths to targets to become shorter
-# making it possible to build on windows, especially mingw seems particular
-# for release builds, disable optimizations as they bump GCC over the edge of
-# allowed memory usage on travis-ci
-variant test_release : release
-	: <asserts>production <debug-symbols>on
-	<invariant-checks>full <boost-link>shared <optimization>off
-	<export-extra>on <threading>multi
-	<inlining>on <deprecated-functions>off
-	;
-variant test_debug : debug
-	: <logging>on
-	<invariant-checks>full <boost-link>shared
-	<export-extra>on <threading>multi <asserts>on
-	;
-variant test_barebones : debug
-	: <dht>off <extensions>off <logging>off <boost-link>shared
-	<deprecated-functions>off <invariant-checks>off
-	<export-extra>on <threading>multi <asserts>on
-	;
-variant test_arm : debug
-	: <dht>off <extensions>off <logging>off
-	<deprecated-functions>off <invariant-checks>off
-	<export-extra>on <asserts>on
-	;
-
 lib advapi32 : : <name>advapi32 ;
 lib user32 : : <name>user32 ;
 lib shell32 : : <name>shell32 ;
@@ -656,6 +667,9 @@ lib crypto : : <name>crypto <use>z <conditional>@openssl-lib-path : :
 	<conditional>@openssl-include-path ;
 lib ssl : : <name>ssl <use>crypto <conditional>@openssl-lib-path : :
 	<conditional>@openssl-include-path ;
+
+lib gnutls : : <name>gnutls <conditional>@gnutls-lib-path : :
+	<conditional>@gnutls-include-path ;
 
 lib wolfssl : : <name>wolfssl <conditional>@wolfssl-lib-path : :
 	<conditional>@wolfssl-include-path ;
@@ -701,7 +715,6 @@ SOURCES =
 	create_torrent
 	disk_buffer_holder
 	disk_buffer_pool
-	disk_interface
 	disk_io_job
 	disk_io_thread_pool
 	disabled_disk_io
@@ -723,10 +736,12 @@ SOURCES =
 	http_parser
 	identify_client
 	ip_filter
+	ip_helpers
 	ip_notifier
 	ip_voter
 	listen_socket_handle
 	merkle
+	merkle_tree
 	peer_connection
 	platform_util
 	bt_peer_connection
@@ -736,7 +751,6 @@ SOURCES =
 	peer_connection_handle
 	i2p_stream
 	instantiate_connection
-	lazy_bdecode
 	natpmp
 	packet_buffer
 	piece_picker
@@ -753,7 +767,6 @@ SOURCES =
 	session_handle
 	session_impl
 	session_call
-	session_udp_sockets
 	settings_pack
 	sha1
 	sha1_hash
@@ -782,7 +795,6 @@ SOURCES =
 	file_view_pool
 	lsd
 	enum_net
-	broadcast_socket
 	magnet_uri
 	parse_url
 	ConvertUTF
@@ -809,6 +821,11 @@ SOURCES =
 	mmap_storage
 	posix_disk_io
 	posix_storage
+	ssl
+	rtc_signaling
+	rtc_stream
+	websocket_stream
+	websocket_tracker_connection
 
 # -- extensions --
 	ut_pex
@@ -867,14 +884,16 @@ local usage-requirements =
 	<define>BOOST_ASIO_HAS_STD_CHRONO
 	<define>BOOST_ASIO_NO_DEPRECATED
 	<conditional>@linking
-	<conditional>@sanitizer-options
 # msvc optimizations
 	<toolset>msvc,<variant>release:<linkflags>"/OPT:ICF=5"
 	<toolset>msvc,<variant>release:<linkflags>"/OPT:REF"
 
 	# disable bogus deprecation warnings on msvc8
-	<toolset>msvc:<define>_SCL_SECURE_NO_DEPRECATE
-	<toolset>msvc:<define>_CRT_SECURE_NO_DEPRECATE
+	<target-os>windows:<define>_SCL_SECURE_NO_DEPRECATE
+	<target-os>windows:<define>_CRT_SECURE_NO_DEPRECATE
+
+	# https://github.com/chriskohlhoff/asio/issues/290#issuecomment-377727614
+	<define>_SILENCE_CXX17_ALLOCATOR_VOID_DEPRECATION_WARNING
 
 	<cxxflags>$(CXXFLAGS)
 	<linkflags>$(LDFLAGS)
@@ -888,12 +907,16 @@ lib torrent
 	src/$(SOURCES).cpp
 
 	: # requirements
-	<include>./ed25519/src
 	<threading>multi
 	<define>TORRENT_BUILDING_LIBRARY
 	<link>shared:<define>TORRENT_BUILDING_SHARED
 	<define>BOOST_NO_DEPRECATED
+	<include>./deps/json/include
+	<define>BOOST_JSON_HEADER_ONLY
 	<link>shared:<define>BOOST_SYSTEM_SOURCE
+
+	# https://github.com/chriskohlhoff/asio/issues/290#issuecomment-377727614
+	<define>_SILENCE_CXX17_ALLOCATOR_VOID_DEPRECATION_WARNING
 
 	<dht>on:<source>src/kademlia/$(KADEMLIA_SOURCES).cpp
 	<dht>on:<source>src/ed25519/$(ED25519_SOURCES).cpp
@@ -909,6 +932,8 @@ lib torrent
 	: # default build
 	<threading>multi
 	<c++-template-depth>512
+	# default to 64 bit address model as it's required by mmap-disk-io.
+	<address-model>64
 
 	: # usage requirements
 	$(usage-requirements)
@@ -918,23 +943,32 @@ lib torrent
 
 headers = [ path.glob-tree include/libtorrent : *.hpp ] ;
 
-package.install install
+package.install install-torrent-lib
 	: <install-source-root>libtorrent
 	:
 	: torrent
 	: $(headers)
 	;
 
+package.install-data install-cmake-module
+	: cmake/Modules
+	: examples/cmake/FindLibtorrentRasterbar.cmake
+	;
+
+alias install : install-torrent-lib install-cmake-module ;
+
+explicit install ;
+
 local header_targets ;
 for local target in $(headers)
 {
-	if ! [ path.basename $(target) ] in windows.hpp win_util.hpp win_crypto_provider.hpp torrent_impl.hpp cppint_import_export.hpp io_service.hpp
+	if ! [ path.basename $(target) ] in storage.hpp windows.hpp win_util.hpp win_crypto_provider.hpp torrent_impl.hpp cppint_import_export.hpp io_service.hpp
 	{
 		# this cast tells boost build that the header files really *are* cpp files
 		# otherwise the object rule doesn't know which language to interpret them as
 		obj header-build/$(target).o : [ cast.cast _ cpp : $(target) ]
-			: <library>/torrent <cxxflags>-fsyntax-only
-			: <cxxstd>14 ;
+			: <library>torrent <cxxflags>-fsyntax-only
+			: <cxxstd>17 ;
 		explicit header-build/$(target).o ;
 		header_targets += $(target) ;
 	}

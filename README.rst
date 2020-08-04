@@ -1,5 +1,6 @@
-libtorrent
-----------
+.. image:: docs/img/logo-color-text.png
+
+|
 
 .. image:: https://travis-ci.org/arvidn/libtorrent.svg?branch=master
     :target: https://travis-ci.org/arvidn/libtorrent
@@ -7,11 +8,11 @@ libtorrent
 .. image:: https://ci.appveyor.com/api/projects/status/w7teauvub5813mew/branch/master?svg=true
     :target: https://ci.appveyor.com/project/arvidn/libtorrent/branch/master
 
-.. image:: https://doozer.io/badge/arvidn/libtorrent/buildstatus/master
-	:target: https://doozer.io/user/arvidn/libtorrent
-
 .. image:: https://img.shields.io/lgtm/alerts/g/arvidn/libtorrent.svg?logo=lgtm&logoWidth=18
 	:target: https://lgtm.com/projects/g/arvidn/libtorrent/alerts/
+
+.. image:: https://oss-fuzz-build-logs.storage.googleapis.com/badges/libtorrent.svg
+    :target: https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&q=proj%3Alibtorrent&can=1
 
 .. image:: https://codecov.io/github/arvidn/libtorrent/coverage.svg?branch=master
     :target: https://codecov.io/github/arvidn/libtorrent?branch=master&view=all#sort=missing&dir=desc
@@ -54,6 +55,10 @@ directory.
 
 See `building.html`__ for more details on how to build and which configuration
 options are available. For python bindings, see `the python docs`__.
+
+libtorrent `ABI report`_.
+
+.. _`ABI report`: https://abi-laboratory.pro/index.php?view=timeline&l=libtorrent
 
 .. __: docs/building.rst
 .. __: docs/python_binding.rst

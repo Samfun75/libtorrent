@@ -36,22 +36,22 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "test.hpp"
-#include "setup_transfer.hpp"
+#include "setup_transfer.hpp"  // for supports_ipv6
 #include "udp_tracker.hpp"
 #include "settings.hpp"
 #include "libtorrent/alert.hpp"
 #include "libtorrent/peer_info.hpp" // for peer_list_entry
-#include "libtorrent/broadcast_socket.hpp" // for supports_ipv6
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/session.hpp"
 #include "libtorrent/session_params.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/tracker_manager.hpp"
 #include "libtorrent/http_tracker_connection.hpp" // for parse_tracker_response
+#include "libtorrent/aux_/websocket_tracker_connection.hpp" // for parse_websocket_tracker_response
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/announce_entry.hpp"
-#include "libtorrent/torrent.hpp"
 #include "libtorrent/aux_/path.hpp"
+#include "libtorrent/socket_io.hpp"
 
 #include <fstream>
 
@@ -351,7 +351,6 @@ void test_udp_tracker(std::string const& iface, address tracker, tcp::endpoint c
 	settings_pack pack = settings();
 	pack.set_bool(settings_pack::announce_to_all_trackers, true);
 	pack.set_bool(settings_pack::announce_to_all_tiers, true);
-	pack.set_str(settings_pack::listen_interfaces, iface + ":48875");
 
 	auto s = std::make_unique<lt::session>(pack);
 
@@ -403,6 +402,9 @@ void test_udp_tracker(std::string const& iface, address tracker, tcp::endpoint c
 		std::this_thread::sleep_for(lt::milliseconds(100));
 	}
 
+	std::printf("peer_ep: %s expected: %s\n"
+		, lt::print_endpoint(peer_ep).c_str()
+		, lt::print_endpoint(expected_peer).c_str());
 	TEST_CHECK(peer_ep == expected_peer);
 	std::printf("destructing session\n");
 
@@ -419,14 +421,21 @@ void test_udp_tracker(std::string const& iface, address tracker, tcp::endpoint c
 
 TORRENT_TEST(udp_tracker_v4)
 {
-	test_udp_tracker("127.0.0.1", address_v4::any(), ep("1.3.3.7", 1337));
+	// if the machine running the test doesn't have an actual IPv4 connection
+	// the test would fail with any other address than loopback (because it
+	// would be unreachable). This is true for some CI's, running containers
+	// without an internet connection
+	test_udp_tracker("127.0.0.1", address_v4::any(), ep("127.0.0.2", 1337));
 }
 
 TORRENT_TEST(udp_tracker_v6)
 {
 	if (supports_ipv6())
 	{
-		test_udp_tracker("[::1]", address_v6::any(), ep("::1.3.3.7", 1337));
+		// if the machine running the test doesn't have an actual IPv6 connection
+		// the test would fail with any other address than loopback (because it
+		// would be unreachable)
+		test_udp_tracker("[::1]", address_v6::any(), ep("::1", 1337));
 	}
 }
 
@@ -556,6 +565,162 @@ TORRENT_TEST(current_tracker)
 	std::printf("done\n");
 }
 
+#if TORRENT_USE_RTC
+TORRENT_TEST(parse_websocket_tracker_response)
+{
+	char const response[] = R"({"complete":1,"incomplete":0,"action":"announce","interval":120,"info_hash":"xxxxxxxxxxxxxxxxxxxx"})";
+
+	error_code ec;
+	auto ret = aux::parse_websocket_tracker_response({response, long(std::strlen(response))}, ec);
+
+	TEST_EQUAL(ec, error_code{});
+	TEST_CHECK(std::holds_alternative<aux::websocket_tracker_response>(ret));
+
+	if(std::holds_alternative<aux::websocket_tracker_response>(ret))
+	{
+		auto parsed = std::get<aux::websocket_tracker_response>(ret);
+
+		TEST_EQUAL(std::string(parsed.info_hash.data(), parsed.info_hash.size()), "xxxxxxxxxxxxxxxxxxxx");
+		TEST_CHECK(!parsed.offer);
+		TEST_CHECK(!parsed.answer);
+		TEST_CHECK(parsed.resp);
+
+		if (parsed.resp)
+		{
+			TEST_EQUAL(parsed.resp->interval.count(), 120);
+			TEST_EQUAL(parsed.resp->complete, 1);
+			TEST_EQUAL(parsed.resp->incomplete, 0);
+			TEST_EQUAL(parsed.resp->downloaded, -1);
+		}
+	}
+}
+
+TORRENT_TEST(parse_websocket_tracker_invalid_json)
+{
+	char const response[] = R"({"invalid":foo)";
+
+	error_code ec;
+	auto ret = aux::parse_websocket_tracker_response({response, long(std::strlen(response))}, ec);
+
+	TEST_EQUAL(ec.value(), boost::system::errc::bad_message);
+	TEST_CHECK(std::holds_alternative<std::string>(ret));
+}
+
+TORRENT_TEST(parse_websocket_tracker_response_invalid_info_hash)
+{
+	char const response[] = R"({"complete":1,"incomplete":0,"action":"announce","interval":120,"info_hash":"tooshort"})";
+
+	error_code ec;
+	auto ret = aux::parse_websocket_tracker_response({response, long(std::strlen(response))}, ec);
+
+	TEST_EQUAL(ec.value(), boost::system::errc::invalid_argument);
+	TEST_CHECK(std::holds_alternative<std::string>(ret));
+}
+
+TORRENT_TEST(parse_websocket_tracker_response_offer)
+{
+	char const response[] = R"({"action":"announce","offer":{"type":"offer","sdp":"SDP\r\n"},"offer_id":"yyyyyyyyyyyyyyyy","peer_id":"-LT2000-p!SALH(DnYsi","info_hash":"xxxxxxxxxxxxxxxxxxxx"})";
+
+	error_code ec;
+	auto ret = aux::parse_websocket_tracker_response({response, long(std::strlen(response))}, ec);
+
+	TEST_EQUAL(ec, error_code{});
+	TEST_CHECK(std::holds_alternative<aux::websocket_tracker_response>(ret));
+
+	if(std::holds_alternative<aux::websocket_tracker_response>(ret))
+	{
+		auto parsed = std::get<aux::websocket_tracker_response>(ret);
+
+		TEST_EQUAL(std::string(parsed.info_hash.data(), parsed.info_hash.size()), "xxxxxxxxxxxxxxxxxxxx");
+		TEST_CHECK(!parsed.resp);
+		TEST_CHECK(!parsed.answer);
+		TEST_CHECK(parsed.offer);
+
+		if (parsed.offer)
+		{
+			TEST_EQUAL(std::string(parsed.offer->id.data(), parsed.offer->id.size()), "yyyyyyyyyyyyyyyy");
+			TEST_EQUAL(parsed.offer->sdp, "SDP\r\n");
+		}
+	}
+}
+
+TORRENT_TEST(parse_websocket_tracker_response_answer)
+{
+	char const response[] = R"({"action":"announce","answer":{"type":"answer","sdp":"SDP\r\n"},"offer_id":"yyyyyyyyyyyyyyyy","peer_id":"-LT2000-p!SALH(DnYsi","info_hash":"xxxxxxxxxxxxxxxxxxxx"})";
+
+	error_code ec;
+	auto ret = aux::parse_websocket_tracker_response({response, long(std::strlen(response))}, ec);
+
+	TEST_EQUAL(ec, error_code{});
+	TEST_CHECK(std::holds_alternative<aux::websocket_tracker_response>(ret));
+
+	if(std::holds_alternative<aux::websocket_tracker_response>(ret))
+	{
+		auto parsed = std::get<aux::websocket_tracker_response>(ret);
+
+		TEST_EQUAL(std::string(parsed.info_hash.data(), parsed.info_hash.size()), "xxxxxxxxxxxxxxxxxxxx");
+		TEST_CHECK(!parsed.resp);
+		TEST_CHECK(!parsed.offer);
+		TEST_CHECK(parsed.answer);
+
+		if(parsed.answer)
+		{
+			TEST_EQUAL(std::string(parsed.answer->offer_id.data(), parsed.answer->offer_id.size()), "yyyyyyyyyyyyyyyy");
+			TEST_EQUAL(parsed.answer->sdp, "SDP\r\n");
+		}
+	}
+}
+
+TORRENT_TEST(websocket_tracker)
+{
+	int const http_port = start_websocket_server();
+
+	settings_pack pack = settings();
+	pack.set_bool(settings_pack::announce_to_all_trackers, true);
+
+	auto s = std::make_unique<lt::session>(pack);
+
+	error_code ec;
+	remove_all("tmp4_tracker", ec);
+	create_directory("tmp4_tracker", ec);
+	std::ofstream file(combine_path("tmp4_tracker", "temporary").c_str());
+	std::shared_ptr<torrent_info> t = ::create_torrent(&file, "temporary", 16 * 1024, 13, false);
+	file.close();
+
+	char tracker_url[200];
+	std::snprintf(tracker_url, sizeof(tracker_url), "ws://127.0.0.1:%d/announce"
+		, http_port);
+	t->add_tracker(tracker_url, 0);
+
+	add_torrent_params addp;
+	addp.flags &= ~torrent_flags::paused;
+	addp.flags &= ~torrent_flags::auto_managed;
+	addp.flags |= torrent_flags::seed_mode;
+	addp.ti = t;
+	addp.save_path = "tmp4_tracker";
+	torrent_handle h = s->add_torrent(addp);
+
+	lt::torrent_status status = h.status();
+	TEST_CHECK(status.current_tracker.empty());
+
+	wait_for_alert(*s, tracker_reply_alert::alert_type, "s");
+
+	std::this_thread::sleep_for(lt::milliseconds(2000));
+
+	status = h.status();
+	TEST_CHECK(!status.current_tracker.empty());
+	TEST_EQUAL(status.current_tracker, tracker_url);
+
+	std::printf("destructing session\n");
+	s.reset();
+	std::printf("done\n");
+
+	std::printf("stop_websocket_server\n");
+	stop_websocket_server();
+	std::printf("done\n");
+}
+#endif
+
 namespace {
 
 void test_proxy(bool proxy_trackers)
@@ -671,7 +836,7 @@ void test_stop_tracker_timeout(int const timeout)
 	settings_pack p = settings();
 	p.set_bool(settings_pack::announce_to_all_trackers, true);
 	p.set_bool(settings_pack::announce_to_all_tiers, true);
-	p.set_str(settings_pack::listen_interfaces, "0.0.0.0:6881");
+	p.set_str(settings_pack::listen_interfaces, "127.0.0.1:6881");
 	p.set_int(settings_pack::stop_tracker_timeout, timeout);
 
 	lt::session s(p);

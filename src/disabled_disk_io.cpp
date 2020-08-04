@@ -36,7 +36,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/disk_buffer_holder.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/time.hpp"
-#include "libtorrent/disk_buffer_pool.hpp"
 #include "libtorrent/performance_counters.hpp"
 #include "libtorrent/debug.hpp"
 #include "libtorrent/units.hpp"
@@ -62,7 +61,7 @@ struct TORRENT_EXTRA_EXPORT disabled_disk_io final
 		std::memset(m_zero_buffer.get(), 0, default_block_size);
 	}
 
-	storage_holder new_torrent(storage_params
+	storage_holder new_torrent(storage_params const&
 		, std::shared_ptr<void> const&) override
 	{
 		return storage_holder(storage_index_t(0), *this);
@@ -146,7 +145,7 @@ struct TORRENT_EXTRA_EXPORT disabled_disk_io final
 		, file_index_t index, std::string name
 		, std::function<void(std::string const&, file_index_t, storage_error const&)> handler) override
 	{
-		post(m_ios, [h = std::move(handler), index, n = std::move(name)]
+		post(m_ios, [h = std::move(handler), index, n = std::move(name)] () mutable
 			{ h(std::move(n), index, storage_error{}); });
 	}
 

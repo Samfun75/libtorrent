@@ -37,6 +37,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/open_mode.hpp"
 #include "libtorrent/aux_/scope_end.hpp"
 #include "libtorrent/torrent_status.hpp"
+#ifdef TORRENT_WINDOWS
+#include "libtorrent/utf8.hpp"
+#endif
 
 #if TORRENT_HAS_SYMLINK
 #include <unistd.h> // for symlink()
@@ -47,15 +50,15 @@ using namespace libtorrent::flags; // for flag operators
 namespace libtorrent {
 namespace aux {
 
-	posix_storage::posix_storage(storage_params p)
+	posix_storage::posix_storage(storage_params const& p)
 		: m_files(p.files)
-		, m_save_path(std::move(p.path))
+		, m_save_path(p.path)
 		, m_part_file_name("." + to_hex(p.info_hash) + ".parts")
 	{
-		if (p.mapped_files) m_mapped_files.reset(new file_storage(*p.mapped_files));
+		if (p.mapped_files) m_mapped_files = std::make_unique<file_storage>(*p.mapped_files);
 	}
 
-	file_storage const& posix_storage::files() const { return m_mapped_files ? *m_mapped_files.get() : m_files; }
+	file_storage const& posix_storage::files() const { return m_mapped_files ? *m_mapped_files : m_files; }
 
 	posix_storage::~posix_storage()
 	{
@@ -379,7 +382,7 @@ namespace aux {
 
 		if (!m_mapped_files)
 		{
-			m_mapped_files.reset(new file_storage(files()));
+			m_mapped_files = std::make_unique<file_storage>(files());
 		}
 		m_mapped_files->rename_file(index, new_filename);
 	}
@@ -512,10 +515,18 @@ namespace aux {
 	{
 		std::string const fn = files().file_path(idx, m_save_path);
 
-		char const* mode_str = (mode & open_mode::write)
+		auto const* mode_str = (mode & open_mode::write)
+#ifdef TORRENT_WINDOWS
+			? L"rb+" : L"rb";
+#else
 			? "rb+" : "rb";
+#endif
 
+#ifdef TORRENT_WINDOWS
+		FILE* f = _wfopen(utf8_wchar(fn).c_str(), mode_str);
+#else
 		FILE* f = fopen(fn.c_str(), mode_str);
+#endif
 		if (f == nullptr)
 		{
 			ec.ec.assign(errno, generic_category());
@@ -542,7 +553,11 @@ namespace aux {
 				// and make sure we create the file this time ("r+") opens for
 				// reading and writing, but doesn't create the file. "w+" creates
 				// the file and truncates it
+#ifdef TORRENT_WINDOWS
+				f = _wfopen(utf8_wchar(fn).c_str(), L"wb+");
+#else
 				f = fopen(fn.c_str(), "wb+");
+#endif
 				if (f == nullptr)
 				{
 					ec.ec.assign(errno, generic_category());

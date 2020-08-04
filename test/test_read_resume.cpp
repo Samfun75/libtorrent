@@ -219,8 +219,8 @@ TORRENT_TEST(read_resume_torrent)
 	entry rd;
 	rd["file-format"] = "libtorrent resume file";
 	rd["file-version"] = 1;
-	rd["info-hash"] = ti->info_hash().v1.to_string();
-	rd["info"] = bdecode({ti->metadata().get(), ti->metadata_size()});
+	rd["info-hash"] = ti->info_hashes().v1.to_string();
+	rd["info"] = bdecode(ti->info_section());
 
 	std::vector<char> resume_data;
 	bencode(std::back_inserter(resume_data), rd);
@@ -230,7 +230,7 @@ TORRENT_TEST(read_resume_torrent)
 	add_torrent_params atp = read_resume_data(resume_data);
 	TEST_CHECK(atp.ti);
 
-	TEST_EQUAL(atp.ti->info_hash(), ti->info_hash());
+	TEST_EQUAL(atp.ti->info_hashes(), ti->info_hashes());
 	TEST_EQUAL(atp.ti->name(), ti->name());
 }
 
@@ -313,6 +313,36 @@ TORRENT_TEST(round_trip_trackers)
 	test_roundtrip(atp);
 }
 
+TORRENT_TEST(round_trip_flags)
+{
+	torrent_flags_t const flags[] = {
+		torrent_flags::seed_mode,
+		torrent_flags::upload_mode,
+		torrent_flags::share_mode,
+		torrent_flags::apply_ip_filter,
+		torrent_flags::paused,
+		torrent_flags::auto_managed,
+		torrent_flags::duplicate_is_error,
+		torrent_flags::update_subscribe,
+		torrent_flags::super_seeding,
+		torrent_flags::sequential_download,
+		torrent_flags::stop_when_ready,
+		torrent_flags::override_trackers,
+		torrent_flags::override_web_seeds,
+		torrent_flags::need_save_resume,
+		torrent_flags::disable_dht,
+		torrent_flags::disable_lsd,
+		torrent_flags::disable_pex,
+	};
+
+	for (auto const& f : flags)
+	{
+		add_torrent_params atp;
+		atp.flags = f;
+		test_roundtrip(atp);
+	}
+}
+
 TORRENT_TEST(round_trip_info_hash)
 {
 	add_torrent_params atp;
@@ -332,6 +362,17 @@ TORRENT_TEST(round_trip_merkle_trees)
 	test_roundtrip(atp);
 }
 
+TORRENT_TEST(round_trip_merkle_tree_mask)
+{
+	add_torrent_params atp;
+	atp.merkle_trees = aux::vector<std::vector<sha256_hash>, file_index_t>{
+		{sha256_hash{"01010101010101010101010101010101"}, sha256_hash{"21212121212121212121212121212121"}}
+		, {sha256_hash{"23232323232323232323232323232323"}, sha256_hash{"43434343434343434343434343434343"}}
+		};
+	atp.merkle_tree_mask = aux::vector<std::vector<bool>, file_index_t>{{false, false, false, true, true, true, true}};
+	test_roundtrip(atp);
+}
+
 TORRENT_TEST(round_trip_verified_leaf_hashes)
 {
 	add_torrent_params atp;
@@ -339,4 +380,3 @@ TORRENT_TEST(round_trip_verified_leaf_hashes)
 		{true, true, false, false}, {false, true, false, true}};
 	test_roundtrip(atp);
 }
-

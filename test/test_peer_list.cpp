@@ -31,12 +31,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "libtorrent/peer_list.hpp"
+#include "libtorrent/aux_/peer_list.hpp"
 #include "libtorrent/torrent_handle.hpp"
 #include "libtorrent/torrent_peer_allocator.hpp"
 #include "libtorrent/peer_connection_interface.hpp"
 #include "libtorrent/stat.hpp"
-#include "libtorrent/ip_voter.hpp"
+#include "libtorrent/aux_/ip_voter.hpp"
 #include "libtorrent/ip_filter.hpp"
 #include "libtorrent/peer_info.hpp"
 #include "libtorrent/random.hpp"
@@ -49,6 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <cstdarg>
 
 using namespace lt;
+using namespace lt::aux;
 
 namespace {
 

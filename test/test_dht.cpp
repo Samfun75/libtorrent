@@ -44,12 +44,12 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/bencode.hpp"
 #include "libtorrent/bdecode.hpp"
 #include "libtorrent/socket_io.hpp" // for hash_address
-#include "libtorrent/broadcast_socket.hpp" // for supports_ipv6
+#include "libtorrent/aux_/ip_helpers.hpp"
 #include "libtorrent/performance_counters.hpp" // for counters
 #include "libtorrent/random.hpp"
 #include "libtorrent/kademlia/ed25519.hpp"
 #include "libtorrent/hex.hpp" // to_hex, from_hex
-#include "libtorrent/bloom_filter.hpp"
+#include "libtorrent/aux_/bloom_filter.hpp"
 #include "libtorrent/hasher.hpp"
 #include "libtorrent/aux_/time.hpp"
 #include "libtorrent/aux_/listen_socket_handle.hpp"
@@ -154,7 +154,7 @@ std::shared_ptr<aux::listen_socket_t> dummy_listen_socket6()
 	return ret;
 }
 
-node* get_foreign_node_stub(node_id const&, std::string const&)
+node* get_foreign_node_stub(node_id const&, string_view)
 {
 	return nullptr;
 }
@@ -324,7 +324,7 @@ void send_dht_response(node& node, bdecode_node const& request, udp::endpoint co
 {
 	entry e;
 	e["y"] = "r";
-	e["t"] = request.dict_find_string_value("t").to_string();
+	e["t"] = std::string(request.dict_find_string_value("t"));
 //	e["ip"] = endpoint_to_bytes(ep);
 	e["r"] = args.a;
 	e["r"].dict().insert(std::make_pair("id", generate_next().to_string()));
@@ -393,7 +393,7 @@ void announce_immutable_items(node& node, udp::endpoint const* eps
 			if (ret)
 			{
 				TEST_EQUAL(parsed[4].string_value(), "r");
-				token = parsed[2].string_value().to_string();
+				token = std::string(parsed[2].string_value());
 //				std::printf("got token: %s\n", token.c_str());
 			}
 			else
@@ -876,7 +876,7 @@ TORRENT_TEST(get_peers_announce)
 	if (ret)
 	{
 		TEST_CHECK(peer1_keys[0].string_value() == "r");
-		token = peer1_keys[2].string_value().to_string();
+		token = std::string(peer1_keys[2].string_value());
 //		std::printf("got token: %s\n", token.c_str());
 	}
 	else
@@ -938,7 +938,7 @@ void test_scrape(address(&rand_addr)())
 		if (ret)
 		{
 			TEST_CHECK(peer1_keys[0].string_value() == "r");
-			token = peer1_keys[2].string_value().to_string();
+			token = std::string(peer1_keys[2].string_value());
 		}
 		else
 		{
@@ -980,8 +980,8 @@ void test_scrape(address(&rand_addr)())
 		TEST_CHECK(peer2_keys[0].string_value() == "r");
 		TEST_EQUAL(peer2_keys[1].dict_find_string_value("n"), "test");
 
-		bloom_filter<256> downloaders;
-		bloom_filter<256> seeds;
+		aux::bloom_filter<256> downloaders;
+		aux::bloom_filter<256> seeds;
 		downloaders.from_string(peer2_keys[2].string_ptr());
 		seeds.from_string(peer2_keys[3].string_ptr());
 
@@ -1022,7 +1022,7 @@ void test_id_enforcement(address(&rand_addr)())
 	t.sett.set_bool(settings_pack::dht_enforce_node_id, true);
 
 	node_id nid;
-	if (is_v4(t.source))
+	if (aux::is_v4(t.source))
 	{
 		// this is one of the test vectors from:
 		// http://libtorrent.org/dht_sec.html
@@ -1073,7 +1073,7 @@ void test_id_enforcement(address(&rand_addr)())
 	TEST_EQUAL(std::get<1>(t.dht_node.size()), nodes_num);
 
 	// now the node-id is valid.
-	if (is_v4(t.source))
+	if (aux::is_v4(t.source))
 		nid[0] = 0x5f;
 	else
 		nid[0] = 0x0a;
@@ -1121,7 +1121,7 @@ TORRENT_TEST(id_enforcement_v6)
 
 TORRENT_TEST(bloom_filter)
 {
-	bloom_filter<256> test;
+	aux::bloom_filter<256> test;
 	for (int i = 0; i < 256; ++i)
 	{
 		char adr[50];
@@ -1323,7 +1323,7 @@ void test_put(address(&rand_addr)())
 		if (ret)
 		{
 			TEST_EQUAL(desc_keys[4].string_value(), "r");
-			token = desc_keys[2].string_value().to_string();
+			token = std::string(desc_keys[2].string_value());
 			std::printf("get response: %s\n"
 				, print_entry(response).c_str());
 			std::printf("got token: %s\n", aux::to_hex(token).c_str());
@@ -1567,7 +1567,7 @@ void test_routing_table(address(&rand_addr)())
 
 	address node_addr;
 	address node_near_addr;
-	if (is_v6(t.source))
+	if (aux::is_v6(t.source))
 	{
 		node_addr = addr6("2001:1111:1111:1111:1111:1111:1111:1111");
 		node_near_addr = addr6("2001:1111:1111:1111:eeee:eeee:eeee:eeee");
@@ -1825,7 +1825,7 @@ void test_bootstrap(address(&rand_addr)())
 	std::vector<node_entry> nodes;
 	nodes.push_back(node_entry{found_node});
 	g_sent_packets.clear();
-	if (is_v4(initial_node))
+	if (aux::is_v4(initial_node))
 		send_dht_response(t.dht_node, response, initial_node, msg_args().nodes(nodes));
 	else
 		send_dht_response(t.dht_node, response, initial_node, msg_args().nodes6(nodes));
@@ -1896,7 +1896,7 @@ void test_bootstrap_want(address(&rand_addr)())
 	g_sent_packets.clear();
 
 	std::vector<udp::endpoint> nodesv;
-	if (is_v4(t.source))
+	if (aux::is_v4(t.source))
 		nodesv.push_back(rand_udp_ep(rand_v6));
 	else
 		nodesv.push_back(rand_udp_ep(rand_v4));
@@ -1915,7 +1915,7 @@ void test_bootstrap_want(address(&rand_addr)())
 			|| find_node_keys[2].string_value() == "get_peers");
 
 		TEST_EQUAL(find_node_keys[7].list_size(), 1);
-		if (is_v4(t.source))
+		if (aux::is_v4(t.source))
 		{
 			TEST_EQUAL(find_node_keys[7].list_string_value_at(0), "n4");
 		}
@@ -2002,7 +2002,7 @@ void test_short_nodes(address(&rand_addr)())
 	g_sent_packets.clear();
 	msg_args args;
 	// chop one byte off of the nodes string
-	if (is_v4(initial_node))
+	if (aux::is_v4(initial_node))
 	{
 		args.nodes(nodes);
 		args.a["nodes"] = args.a["nodes"].string().substr(1);
@@ -2094,7 +2094,7 @@ void test_get_peers(address(&rand_addr)())
 	nodes.push_back(node_entry{next_node});
 
 	g_sent_packets.clear();
-	if (is_v4(initial_node))
+	if (aux::is_v4(initial_node))
 	{
 		send_dht_response(t.dht_node, response, initial_node
 			, msg_args().nodes(nodes).token("10").port(1234).peers(peers[0]));
@@ -2387,7 +2387,7 @@ TORRENT_TEST(immutable_put)
 				TEST_ERROR(t.error_string);
 				continue;
 			}
-			char tok[10];
+			char tok[11];
 			std::snprintf(tok, sizeof(tok), "%02d", idx);
 
 			msg_args args;
@@ -2418,7 +2418,7 @@ TORRENT_TEST(immutable_put)
 				TEST_EQUAL(put_immutable_item_keys[2].string_value(), "put");
 				span<const char> const v = put_immutable_item_keys[6].data_section();
 				TEST_EQUAL(v, span<char const>(flat_data));
-				char tok[10];
+				char tok[11];
 				std::snprintf(tok, sizeof(tok), "%02d", idx);
 				TEST_EQUAL(put_immutable_item_keys[5].string_value(), tok);
 				if (put_immutable_item_keys[0].string_value() != "q"
@@ -2492,7 +2492,7 @@ TORRENT_TEST(mutable_put)
 				TEST_ERROR(t.error_string);
 				continue;
 			}
-			char tok[10];
+			char tok[11];
 			std::snprintf(tok, sizeof(tok), "%02d", idx);
 
 			msg_args args;
@@ -2528,7 +2528,7 @@ TORRENT_TEST(mutable_put)
 					, std::string(sig.bytes.data(), signature::len));
 				span<const char> const v = put_mutable_item_keys[10].data_section();
 				TEST_CHECK(v == itemv);
-				char tok[10];
+				char tok[11];
 				std::snprintf(tok, sizeof(tok), "%02d", idx);
 				TEST_EQUAL(put_mutable_item_keys[9].string_value(), tok);
 				if (put_mutable_item_keys[0].string_value() != "q"
@@ -2610,7 +2610,7 @@ TORRENT_TEST(traversal_done)
 			TEST_ERROR(t.error_string);
 			continue;
 		}
-		char tok[10];
+		char tok[11];
 		std::snprintf(tok, sizeof(tok), "%02d", i);
 
 		msg_args args;
@@ -2646,7 +2646,7 @@ TORRENT_TEST(dht_dual_stack)
 	obs observer;
 	counters cnt;
 	node* node4p = nullptr, *node6p = nullptr;
-	auto get_foreign_node = [&](node_id const&, std::string const& family)
+	auto get_foreign_node = [&](node_id const&, string_view const family)
 	{
 		if (family == "n4") return node4p;
 		if (family == "n6") return node6p;
@@ -3687,6 +3687,7 @@ TORRENT_TEST(sample_infohashes)
 
 	g_sent_packets.clear();
 
+	node_id nid = generate_random_id();
 	udp::endpoint initial_node = rand_udp_ep();
 	t.dht_node.m_table.add_node(node_entry{initial_node});
 
@@ -3697,10 +3698,13 @@ TORRENT_TEST(sample_infohashes)
 	udp::endpoint const ep2 = rand_udp_ep(rand_v4);
 
 	t.dht_node.sample_infohashes(initial_node, items[0].target,
-		[h1, ep1, h2, ep2](time_duration interval, int num
+		[nid, h1, ep1, h2, ep2](node_id const& node_id
+			, time_duration interval
+			, int num
 			, std::vector<sha1_hash> samples
 			, std::vector<std::pair<sha1_hash, udp::endpoint>> const& nodes)
 	{
+		TEST_EQUAL(node_id, nid);
 		TEST_EQUAL(total_seconds(interval), 10);
 		TEST_EQUAL(num, 2);
 		TEST_EQUAL(samples.size(), 1);
@@ -3740,6 +3744,7 @@ TORRENT_TEST(sample_infohashes)
 	g_sent_packets.clear();
 	send_dht_response(t.dht_node, response, initial_node
 		, msg_args()
+			.nid(nid)
 			.interval(seconds(10))
 			.num(2)
 			.samples({to_hash("1000000000000000000000000000000000000001")})

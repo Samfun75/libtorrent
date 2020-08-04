@@ -11,6 +11,9 @@ use-project /torrent : .. ;
 feature fuzz : off external on : composite propagated link-incompatible ;
 feature.compose <fuzz>on : <cflags>-fsanitize=fuzzer <linkflags>-fsanitize=fuzzer ;
 
+feature sanitize : off on : composite propagated link-incompatible ;
+feature.compose <sanitize>on : <address-sanitizer>norecover <undefined-sanitizer>norecover ;
+
 # this is a build configuration that only does limited validation (i.e. no
 # sanitizers, invariant-checks, asserts etc.). The purpose is to quickly iterate
 # on inputs to build code coverage
@@ -19,16 +22,16 @@ variant build_coverage : release : <sanitize>off <debug-symbols>on <asserts>off 
 project fuzzers
 	: requirements
 	<export-extra>on
-	<define>TORRENT_USE_ASSERTS=1
 	<define>TORRENT_USE_IPV6=1
 	<define>_SCL_SECURE=1
 	<define>_GLIBCXX_DEBUG
 	<cxxflags>-fno-omit-frame-pointer
 	<linkflags>-fno-omit-frame-pointer
-	<library>/torrent//torrent/
+	<library>/torrent//torrent
 	: default-build
-	<cxxstd>14
+	<cxxstd>17
 	<fuzz>on
+	<threading>multi
 	<sanitize>on
 	<link>static
 	<variant>release
@@ -50,7 +53,6 @@ rule fuzzer ( name )
 fuzzer torrent_info ;
 fuzzer parse_magnet_uri ;
 fuzzer bdecode_node ;
-fuzzer lazy_bdecode ;
 fuzzer parse_int ;
 fuzzer sanitize_path ;
 fuzzer escape_path ;
@@ -73,10 +75,10 @@ fuzzer utp ;
 fuzzer resume_data ;
 fuzzer peer_conn ;
 fuzzer session_params ;
+fuzzer add_torrent ;
 
 local LARGE_TARGETS =
 	torrent_info
-	lazy_bdecode
 	bdecode_node
 	http_parser
 	dht_node
@@ -87,6 +89,7 @@ local LARGE_TARGETS =
 	upnp
 	peer_conn
 	session_params
+	add_torrent
 	;
 
 install stage : $(TARGETS) : <install-type>EXE <location>fuzzers ;

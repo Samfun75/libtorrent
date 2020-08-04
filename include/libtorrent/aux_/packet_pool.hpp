@@ -54,7 +54,6 @@ namespace aux {
 	constexpr int TORRENT_UDP_HEADER = 8;
 	constexpr int TORRENT_UTP_HEADER = 20;
 	constexpr int TORRENT_SOCKS5_HEADER = 6; // plus the size of the destination address
-
 	constexpr int TORRENT_ETHERNET_MTU = 1500;
 	constexpr int TORRENT_TEREDO_MTU = 1280;
 	constexpr int TORRENT_INET_MIN_MTU = 576;
@@ -213,8 +212,8 @@ namespace aux {
 			else if (allocate <= m_mtu_ceiling_slab.allocate_size) { return m_mtu_ceiling_slab.alloc(); }
 			return create_packet(allocate);
 		}
-		constexpr static int mtu_floor_size = TORRENT_INET_MIN_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
-		constexpr static int mtu_ceiling_size = TORRENT_ETHERNET_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
+		static constexpr int mtu_floor_size = TORRENT_INET_MIN_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
+		static constexpr int mtu_ceiling_size = TORRENT_ETHERNET_MTU - TORRENT_IPV4_HEADER - TORRENT_UDP_HEADER;
 		packet_slab m_syn_slab;
 		packet_slab m_mtu_floor_slab;
 		packet_slab m_mtu_ceiling_slab;

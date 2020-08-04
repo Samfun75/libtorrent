@@ -38,22 +38,28 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/socket.hpp"
 #include "libtorrent/error_code.hpp"
-#include "libtorrent/broadcast_socket.hpp"
 #include "libtorrent/deadline_timer.hpp"
 #include "libtorrent/enum_net.hpp"
-#include "libtorrent/resolver.hpp"
+#include "libtorrent/aux_/resolver.hpp"
 #include "libtorrent/debug.hpp"
 #include "libtorrent/string_util.hpp"
 #include "libtorrent/aux_/portmap.hpp"
 #include "libtorrent/aux_/vector.hpp"
+#include "libtorrent/aux_/listen_socket_handle.hpp"
+#include "libtorrent/aux_/noexcept_movable.hpp"
+#include "libtorrent/aux_/session_settings.hpp"
+#include "libtorrent/ssl.hpp"
 
 #include <memory>
 #include <functional>
 #include <set>
 
 namespace libtorrent {
-	struct http_connection;
-	class http_parser;
+
+	namespace aux {
+		struct http_connection;
+		class http_parser;
+	}
 
 namespace upnp_errors {
 	// error codes for the upnp_error_category. They hold error codes
@@ -71,7 +77,7 @@ namespace upnp_errors {
 		// The source IP address cannot be wild-carded, but
 		// must be fully specified
 		source_ip_cannot_be_wildcarded = 715,
-		// The external port cannot be wildcarded, but must
+		// The external port cannot be a wildcard, but must
 		// be specified
 		external_port_cannot_be_wildcarded = 716,
 		// The port mapping entry specified conflicts with a
@@ -150,12 +156,13 @@ struct TORRENT_EXTRA_EXPORT upnp final
 	, single_threaded
 {
 	upnp(io_context& ios
-		, std::string user_agent
+		, aux::session_settings const& settings
 		, aux::portmap_callback& cb
-		, bool ignore_nonrouters);
+		, address_v4 listen_address
+		, address_v4 netmask
+		, std::string listen_device
+		, aux::listen_socket_handle ls);
 	~upnp();
-
-	void set_user_agent(std::string const& v) { m_user_agent = v; }
 
 	void start();
 
@@ -185,7 +192,6 @@ struct TORRENT_EXTRA_EXPORT upnp final
 	bool get_mapping(port_mapping_t mapping_index, tcp::endpoint& local_ep, int& external_port
 		, portmap_protocol& protocol) const;
 
-	void discover_device();
 	void close();
 
 	// This is only available for UPnP routers. If the model is advertised by
@@ -200,31 +206,36 @@ private:
 
 	std::shared_ptr<upnp> self() { return shared_from_this(); }
 
+	void open_multicast_socket(udp::socket& s, error_code& ec);
+	void open_unicast_socket(udp::socket& s, error_code& ec);
+
 	void map_timer(error_code const& ec);
-	void try_map_upnp(bool timer = false);
+	void try_map_upnp();
 	void discover_device_impl();
 
 	void resend_request(error_code const& e);
-	void on_reply(udp::endpoint const& from, span<char const> buffer);
+	void on_reply(udp::socket& s, error_code const& ec);
 
 	struct rootdevice;
 	void next(rootdevice& d, port_mapping_t i);
 	void update_map(rootdevice& d, port_mapping_t i);
 
+	int lease_duration(rootdevice const& d) const;
+
 	void connect(rootdevice& d);
 
 	void on_upnp_xml(error_code const& e
-		, libtorrent::http_parser const& p, rootdevice& d
-		, http_connection& c);
+		, aux::http_parser const& p, rootdevice& d
+		, aux::http_connection& c);
 	void on_upnp_get_ip_address_response(error_code const& e
-		, libtorrent::http_parser const& p, rootdevice& d
-		, http_connection& c);
+		, aux::http_parser const& p, rootdevice& d
+		, aux::http_connection& c);
 	void on_upnp_map_response(error_code const& e
-		, libtorrent::http_parser const& p, rootdevice& d
-		, port_mapping_t mapping, http_connection& c);
+		, aux::http_parser const& p, rootdevice& d
+		, port_mapping_t mapping, aux::http_connection& c);
 	void on_upnp_unmap_response(error_code const& e
-		, libtorrent::http_parser const& p, rootdevice& d
-		, port_mapping_t mapping, http_connection& c);
+		, aux::http_parser const& p, rootdevice& d
+		, port_mapping_t mapping, aux::http_connection& c);
 	void on_expire(error_code const& e);
 
 	void disable(error_code const& ec);
@@ -236,7 +247,7 @@ private:
 
 	void get_ip_address(rootdevice& d);
 	void delete_port_mapping(rootdevice& d, port_mapping_t i);
-	void create_port_mapping(http_connection& c, rootdevice& d, port_mapping_t i);
+	void create_port_mapping(aux::http_connection& c, rootdevice& d, port_mapping_t i);
 	void post(upnp::rootdevice const& d, char const* soap
 		, char const* soap_action);
 
@@ -265,7 +276,7 @@ private:
 		~rootdevice();
 		rootdevice(rootdevice const&);
 		rootdevice& operator=(rootdevice const&) &;
-		rootdevice(rootdevice&&);
+		rootdevice(rootdevice&&) noexcept;
 		rootdevice& operator=(rootdevice&&) &;
 
 		// the interface url, through which the list of
@@ -285,13 +296,10 @@ private:
 		std::string hostname;
 		int port = 0;
 		std::string path;
-		address external_ip;
+		aux::noexcept_movable<address> external_ip;
 
-		// there are routers that's don't support timed
-		// port maps, without returning error 725. It seems
-		// safer to always assume that we have to ask for
-		// permanent leases
-		int lease_duration = 0;
+		// set to false if the router doesn't support lease durations
+		bool use_lease_duration = true;
 
 		// true if the device supports specifying a
 		// specific external port, false if it doesn't
@@ -299,14 +307,7 @@ private:
 
 		bool disabled = false;
 
-		// this is true if the IP of this device is not
-		// one of our default routes. i.e. it may be someone
-		// else's router, we just happen to have multicast
-		// enabled across networks
-		// this is only relevant if ignore_non_routers is set.
-		bool non_router = false;
-
-		mutable std::shared_ptr<http_connection> upnp_connection;
+		mutable std::shared_ptr<aux::http_connection> upnp_connection;
 
 #if TORRENT_USE_ASSERTS
 		int magic = 1337;
@@ -324,7 +325,7 @@ private:
 
 	aux::vector<global_mapping_t, port_mapping_t> m_mappings;
 
-	std::string m_user_agent;
+	aux::session_settings const& m_settings;
 
 	// the set of devices we've found
 	std::set<rootdevice> m_devices;
@@ -332,15 +333,16 @@ private:
 	aux::portmap_callback& m_callback;
 
 	// current retry count
-	int m_retry_count;
+	int m_retry_count = 0;
 
 	io_context& m_io_service;
 
-	resolver m_resolver;
+	aux::resolver m_resolver;
 
 	// the udp socket used to send and receive
 	// multicast messages on the network
-	broadcast_socket m_socket;
+	udp::socket m_multicast_socket;
+	udp::socket m_unicast_socket;
 
 	// used to resend udp packets in case
 	// they time out
@@ -356,17 +358,22 @@ private:
 	// map them anyway.
 	deadline_timer m_map_timer;
 
-	io_context& m_ioc;
-
-	bool m_disabled;
-	bool m_closing;
-	bool m_ignore_non_routers;
+	bool m_disabled = false;
+	bool m_closing = false;
 
 	std::string m_model;
 
-	// cache of interfaces
-	mutable std::vector<ip_interface> m_interfaces;
-	mutable time_point m_last_if_update;
+	// the network this UPnP mapper is associated with. Don't talk to any other
+	// network
+	address_v4 m_listen_address;
+	address_v4 m_netmask;
+	std::string m_device;
+
+#if TORRENT_USE_SSL
+	ssl::context m_ssl_ctx;
+#endif
+
+	aux::listen_socket_handle m_listen_handle;
 };
 
 } // namespace libtorrent

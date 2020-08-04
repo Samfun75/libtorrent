@@ -87,11 +87,13 @@ namespace libtorrent {
 		std::string device;
 		int port;
 		bool ssl;
+		bool local;
 		friend bool operator==(listen_interface_t const& lhs, listen_interface_t const& rhs)
 		{
 			return lhs.device == rhs.device
 				&& lhs.port == rhs.port
-				&& lhs.ssl == rhs.ssl;
+				&& lhs.ssl == rhs.ssl
+				&& lhs.local == rhs.local;
 		}
 	};
 
@@ -121,8 +123,8 @@ namespace libtorrent {
 
 	// strdup is not part of the C standard. Some systems
 	// don't have it and it won't be available when building
-	// in strict ansi mode
-	char* allocate_string_copy(string_view str);
+	// in strict ANSI mode
+	TORRENT_EXTRA_EXPORT char* allocate_string_copy(string_view str);
 
 	// searches for separator ('sep') in the string 'last'.
 	// if found, returns the string_view representing the range from the start of
@@ -131,6 +133,9 @@ namespace libtorrent {
 	// if no separator is found, the whole string is returned and the second
 	// return value is an empty string_view.
 	TORRENT_EXTRA_EXPORT std::pair<string_view, string_view> split_string(string_view last, char sep);
+
+	// removes whitespaces at the beginning of the string, in-place
+	TORRENT_EXTRA_EXPORT void ltrim(std::string& s);
 
 #if TORRENT_USE_I2P
 

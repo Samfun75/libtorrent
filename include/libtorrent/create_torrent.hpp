@@ -43,6 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/string_view.hpp"
 #include "libtorrent/aux_/vector.hpp"
 #include "libtorrent/aux_/path.hpp" // for combine_path etc.
+#include "libtorrent/fwd.hpp"
 
 #include <vector>
 #include <string>
@@ -92,8 +93,6 @@ POSSIBILITY OF SUCH DAMAGE.
 //
 namespace libtorrent {
 
-	class torrent_info;
-
 	// hidden
 	using create_flags_t = flags::bitfield_flag<std::uint32_t, struct create_flags_tag>;
 
@@ -103,17 +102,21 @@ namespace libtorrent {
 	// .torrent file using bencode().
 	struct TORRENT_EXPORT create_torrent
 	{
+#if TORRENT_ABI_VERSION == 1
+		using flags_t = create_flags_t;
+#endif
+
 #if TORRENT_ABI_VERSION <= 2
 		// This will insert pad files to align the files to piece boundaries, for
 		// optimized disk-I/O. This will minimize the number of bytes of pad-
 		// files, to keep the impact down for clients that don't support
 		// them.
 		// incompatible with v2 metadata, ignored
-		static constexpr create_flags_t TORRENT_DEPRECATED_MEMBER optimize_alignment = 0_bit;
+		TORRENT_DEPRECATED static inline constexpr create_flags_t optimize_alignment = 0_bit;
 #endif
 #if TORRENT_ABI_VERSION == 1
 		// same as optimize_alignment, for backwards compatibility
-		static constexpr create_flags_t TORRENT_DEPRECATED_MEMBER optimize = 0_bit;
+		TORRENT_DEPRECATED static inline constexpr create_flags_t optimize = 0_bit;
 #endif
 
 #if TORRENT_ABI_VERSION <= 2
@@ -126,7 +129,7 @@ namespace libtorrent {
 		// and should be saved off separately. It is accessed through the
 		// create_torrent::merkle_tree() function.
 		// support for BEP 30 merkle torrents has been removed
-		static constexpr create_flags_t TORRENT_DEPRECATED_MEMBER merkle = 1_bit;
+		TORRENT_DEPRECATED static inline constexpr create_flags_t merkle = 1_bit;
 #endif
 
 		// This will include the file modification time as part of the torrent.
@@ -135,46 +138,49 @@ namespace libtorrent {
 		// yield the same info-hash. If the files have different modification times,
 		// with this option enabled, you would get different info-hashes for the
 		// files.
-		static constexpr create_flags_t modification_time = 2_bit;
+		static inline constexpr create_flags_t modification_time = 2_bit;
 
 		// If this flag is set, files that are symlinks get a symlink attribute
 		// set on them and their data will not be included in the torrent. This
 		// is useful if you need to reconstruct a file hierarchy which contains
 		// symlinks.
-		static constexpr create_flags_t symlinks = 3_bit;
+		static inline constexpr create_flags_t symlinks = 3_bit;
 
 		// to create a torrent that can be updated via a *mutable torrent*
 		// (see `BEP 38`_). This also needs to be enabled for torrents that update
 		// another torrent.
-		//
-		// .. _`BEP 38`: http://www.bittorrent.org/beps/bep_0038.html
 #if TORRENT_ABI_VERSION <= 2
 		// BEP 52 requires files to be piece aligned so all torrents are now compatible
 		// with BEP 38
-		static constexpr create_flags_t TORRENT_DEPRECATED_MEMBER mutable_torrent_support = 4_bit;
+		TORRENT_DEPRECATED static inline constexpr create_flags_t mutable_torrent_support = 4_bit;
 #endif
 
 		// Do not generate v1 metadata. The resulting torrent will only be usable by
-		// clients which support v2.
-		static constexpr create_flags_t v2_only = 5_bit;
+		// clients which support v2. This requires setting all v2 hashes, with
+		// set_hash2() before calling generate(). Setting v1 hashes (with
+		// set_hash()) is an error with this flag set.
+		static inline constexpr create_flags_t v2_only = 5_bit;
 
 		// do not generate v2 metadata or enforce v2 alignment and padding rules
-		// this is mainly for tests, not recommended for production use
-		static constexpr create_flags_t v1_only = 6_bit;
+		// this is mainly for tests, not recommended for production use. This
+		// requires setting all v1 hashes, with set_hash(), before calling
+		// generate(). Setting v2 hashes (with set_hash2()) is an error with
+		// this flag set.
+		static inline constexpr create_flags_t v1_only = 6_bit;
 
-		// The ``piece_size`` is the size of each piece in bytes. It must
-		// be a power of 2 and a minimum of 16 kiB. If a piece size of 0 is specified, a
-		// piece_size will be calculated such that the torrent file is roughly 40 kB.
+		// The ``piece_size`` is the size of each piece in bytes. It must be a
+		// power of 2 and a minimum of 16 kiB. If a piece size of 0 is
+		// specified, a piece_size will be set automatically.
 		//
 		// The overload that takes a ``torrent_info`` object will make a verbatim
 		// copy of its info dictionary (to preserve the info-hash). The copy of
 		// the info dictionary will be used by create_torrent::generate(). This means
 		// that none of the member functions of create_torrent that affects
-		// the content of the info dictionary (such as ``set_hash()``), will
+		// the content of the info dictionary (such as set_hash()), will
 		// have any affect.
 		//
 		// The ``flags`` arguments specifies options for the torrent creation. It can
-		// be any combination of the flags defined by create_torrent::flags_t.
+		// be any combination of the flags defined by create_flags_t.
 		explicit create_torrent(file_storage& fs, int piece_size = 0
 			, create_flags_t flags = {});
 		explicit create_torrent(torrent_info const& ti);
@@ -195,25 +201,23 @@ namespace libtorrent {
 		// It may be useful to add custom entries to the torrent file before bencoding it
 		// and saving it to disk.
 		//
-		// If anything goes wrong during torrent generation, this function will return
-		// an empty ``entry`` structure. You can test for this condition by querying the
-		// type of the entry:
+		// Whether the resulting torrent object is v1, v2 or hybrid depends on
+		// whether any of the v1_only or v2_only flags were set on the
+		// constructor. If neither were set, the resulting torrent depends on
+		// which hashes were set. If both v1 and v2 hashes were set, a hybrid
+		// torrent is created.
 		//
-		// .. code:: c++
+		// Any failure will cause this function to throw system_error, with an
+		// appropriate error message. These are the reasons this call may throw:
 		//
-		//	file_storage fs;
-		//	// add file ...
-		//	create_torrent t(fs);
-		//	// add trackers and piece hashes ...
-		//	e = t.generate();
-		//
-		//	if (e.type() == entry::undefined_t)
-		//	{
-		//		// something went wrong
-		//	}
-		//
-		// For instance, you cannot generate a torrent with 0 files in it. If you don't add
-		// any files to the ``file_storage``, torrent generation will fail.
+		// * the file storage has 0 files
+		// * the total size of the file storage is 0 bytes (i.e. it only has
+		//   empty files)
+		// * not all v1 hashes (set_hash()) and not all v2 hashes (set_hash2())
+		//   were set
+		// * for v2 torrents, you may not have a directory with the same name as
+		//   a file. If that's encountered in the file storage, generate()
+		//   fails.
 		entry generate() const;
 
 		// returns an immutable reference to the file_storage used to create
@@ -232,6 +236,11 @@ namespace libtorrent {
 		// to set the hash for every piece in the torrent before generating it. If you have
 		// the files on disk, you can use the high level convenience function to do this.
 		// See set_piece_hashes().
+		// A SHA-1 hash of all zeros is internally used to indicate a hash that
+		// has not been set. Setting such hash will not be considered set when
+		// calling generate().
+		// This function will throw ``std::system_error`` if it is called on an
+		// object constructed with the v2_only flag.
 		void set_hash(piece_index_t index, sha1_hash const& h);
 
 		// sets the bittorrent v2 hash for file `file` of the piece `piece`.
@@ -241,15 +250,23 @@ namespace libtorrent {
 		// The hash, `h`, is the root of the merkle tree formed by the piece's
 		// 16 kiB blocks. Note that piece sizes must be powers-of-2, so all
 		// per-piece merkle trees are complete.
+		// A SHA-256 hash of all zeros is internally used to indicate a hash
+		// that has not been set. Setting such hash will not be considered set
+		// when calling generate().
+		// This function will throw ``std::system_error`` if it is called on an
+		// object constructed with the v1_only flag.
 		void set_hash2(file_index_t file, piece_index_t::diff_type piece, sha256_hash const& h);
 
+#if TORRENT_ABI_VERSION < 3
 		// This sets the sha1 hash for this file. This hash will end up under the key ``sha1``
 		// associated with this file (for multi-file torrents) or in the root info dictionary
 		// for single-file torrents.
 		// .. note::
 		//
 		// 	with bittorrent v2, this feature is obsolete
+		TORRENT_DEPRECATED
 		void set_file_hash(file_index_t index, sha1_hash const& h);
+#endif
 
 		// This adds a url seed to the torrent. You can have any number of url seeds. For a
 		// single file torrent, this should be an HTTP url, pointing to a file with identical
@@ -322,8 +339,6 @@ namespace libtorrent {
 		// to share files with this torrent. A torrent may have more than one
 		// collection and more than one similar torrents. For more information,
 		// see `BEP 38`_.
-		//
-		// .. _`BEP 38`: http://www.bittorrent.org/beps/bep_0038.html
 		void add_similar_torrent(sha1_hash ih);
 		void add_collection(string_view c);
 
@@ -343,6 +358,8 @@ namespace libtorrent {
 
 		aux::vector<sha1_hash, piece_index_t> m_piece_hash;
 
+		// leave this here for now, to preserve ABI between building with
+		// deprecated functions and without
 		aux::vector<sha1_hash, file_index_t> m_filehashes;
 
 		mutable aux::vector<sha256_hash, file_index_t> m_fileroots;
@@ -405,7 +422,9 @@ namespace aux {
 	//
 	// If specified, the predicate ``p`` is called once for every file and directory that
 	// is encountered. Files for which ``p`` returns true are added, and directories for
-	// which ``p`` returns true are traversed. ``p`` must have the following signature::
+	// which ``p`` returns true are traversed. ``p`` must have the following signature:
+	//
+	// .. code:: c++
 	//
 	// 	bool Pred(std::string const& p);
 	//
@@ -425,13 +444,21 @@ namespace aux {
 	// This function will assume that the files added to the torrent file exists at path
 	// ``p``, read those files and hash the content and set the hashes in the ``create_torrent``
 	// object. The optional function ``f`` is called in between every hash that is set. ``f``
-	// must have the following signature::
+	// must have the following signature:
+	//
+	// .. code:: c++
 	//
 	// 	void Fun(piece_index_t);
+	//
+	// The overloads taking a settings_pack may be used to configure the
+	// underlying disk access. Such as ``settings_pack::aio_threads``.
 	//
 	// The overloads that don't take an ``error_code&`` may throw an exception in case of a
 	// file error, the other overloads sets the error code to reflect the error, if any.
 	TORRENT_EXPORT void set_piece_hashes(create_torrent& t, std::string const& p
+		, std::function<void(piece_index_t)> const& f, error_code& ec);
+	TORRENT_EXPORT void set_piece_hashes(create_torrent& t, std::string const& p
+		, settings_interface const& settings
 		, std::function<void(piece_index_t)> const& f, error_code& ec);
 	inline void set_piece_hashes(create_torrent& t, std::string const& p, error_code& ec)
 	{
@@ -451,13 +478,21 @@ namespace aux {
 		set_piece_hashes(t, p, f, ec);
 		if (ec) throw system_error(ec);
 	}
+	inline void set_piece_hashes(create_torrent& t, std::string const& p
+		, settings_interface const& settings
+		, std::function<void(piece_index_t)> const& f)
+	{
+		error_code ec;
+		set_piece_hashes(t, p, settings, f, ec);
+		if (ec) throw system_error(ec);
+	}
 #endif
+
+#if TORRENT_ABI_VERSION == 1
 
 	// all wstring APIs are deprecated since 0.16.11
 	// instead, use the wchar -> utf8 conversion functions
 	// and pass in utf8 strings
-#if TORRENT_ABI_VERSION == 1
-
 	TORRENT_DEPRECATED_EXPORT
 	void add_files(file_storage& fs, std::wstring const& wfile
 		, std::function<bool(std::string)> p, create_flags_t flags = {});
