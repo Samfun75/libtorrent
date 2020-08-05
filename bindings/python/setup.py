@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
 
 
-from distutils.core import setup, Extension
+from setuptools import setup, Extension
 import os
 import platform
 import sys
+import glob
 import shutil
 import multiprocessing
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+    class bdist_wheel(_bdist_wheel):
+        def finalize_options(self):
+            _bdist_wheel.finalize_options(self)
+            self.root_is_pure = False
+except ImportError:
+    bdist_wheel = None
+
+from distutils.command.install import install as _install
+class install(_install):
+    def finalize_options(self):
+        self.install_lib = self.install_platlib
+        _install.finalize_options(self)
 
 
 def bjam_build():
@@ -38,6 +55,11 @@ def bjam_build():
         # on windows, just link all the dependencies together to keep it simple
         toolset += ' libtorrent-link=static boost-link=static'
 
+    # stage dependencies when building wheel
+    stage = 'stage_module'
+    if 'bdist_wheel' in sys.argv and platform.system() != 'Windows':
+        stage += ' stage_dependencies'
+
     parallel_builds = ' -j%d' % multiprocessing.cpu_count()
     if sys.maxsize > 2**32:
         address_model = ' address-model=64'
@@ -49,31 +71,21 @@ def bjam_build():
     os.environ['LIBTORRENT_PYTHON_INTERPRETER'] = '"' + sys.executable + '"'
 
     # build libtorrent using bjam and build the installer with distutils
-    cmdline = ('b2 release optimization=space stage_module --hash' +
+    cmdline = ('b2 release optimization=space ' + stage + ' --hash' +
                address_model + toolset + parallel_builds)
     print(cmdline)
     if os.system(cmdline) != 0:
         print('build failed')
         sys.exit(1)
 
-    try:
-        os.mkdir('build')
-    except BaseException:
-        pass
-    try:
-        shutil.rmtree('build/lib')
-    except BaseException:
-        pass
-    try:
-        os.mkdir('build/lib')
-    except BaseException:
-        pass
-    try:
-        os.mkdir('libtorrent')
-    except BaseException:
-        pass
-    shutil.copyfile('libtorrent' + file_ext,
-                    'build/lib/libtorrent' + file_ext)
+    # prepare directories
+    shutil.rmtree('build', ignore_errors=True)
+    shutil.rmtree('libtorrent', ignore_errors=True)
+    os.makedirs('build/lib')
+    os.makedirs('libtorrent')
+
+    # copy compiled libtorrent into correct directory
+    shutil.copy2(glob.glob('libtorrent.*' + file_ext)[0], 'build/lib')
 
     return None
 
@@ -103,6 +115,7 @@ with open('README.rst') as f:
     readme = f.read()
 
 ext = None
+
 if '--help' not in sys.argv and '--help-commands' not in sys.argv:
     ext = bjam_build()
     # ext = distutils_build()
@@ -120,8 +133,6 @@ setup(
 
     packages=['libtorrent'],
     ext_modules=ext,
-    data_files=[('.', ['README.rst', 'COPYING', 'LICENSE'])],
-    platforms=[platform.system() + '-' + platform.machine()],
 
     author='Arvid Norberg',
     author_email='arvid@libtorrent.org',
@@ -141,4 +152,9 @@ setup(
         'Topic :: System :: Networking',
         'Topic :: Utilities',
     ],
+
+    cmdclass={
+        'bdist_wheel': bdist_wheel,
+        'install': install,
+    },
 )
