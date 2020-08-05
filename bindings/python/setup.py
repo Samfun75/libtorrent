@@ -27,6 +27,16 @@ class install(_install):
 
 
 def bjam_build():
+    # prepare directories
+    shutil.rmtree('build', ignore_errors=True)
+    shutil.rmtree('libtorrent', ignore_errors=True)
+    os.makedirs('build/lib')
+    os.makedirs('libtorrent')
+
+    # don't build libtorrent when using commands that were not supposed to use built extension
+    if any(cmd in ['--help', '--help-commands', 'clean', 'sdist', 'dist_info', 'egg_info'] for cmd in sys.argv):
+        return None
+
     toolset = ''
     file_ext = '.so'
 
@@ -55,10 +65,9 @@ def bjam_build():
         # on windows, just link all the dependencies together to keep it simple
         toolset += ' libtorrent-link=static boost-link=static'
 
-    # stage dependencies when building wheel
-    stage = 'stage_module'
+    # statically link libtorrent when building wheel
     if 'bdist_wheel' in sys.argv and platform.system() != 'Windows':
-        stage += ' stage_dependencies'
+        toolset += ' libtorrent-link=static'
 
     parallel_builds = ' -j%d' % multiprocessing.cpu_count()
     if sys.maxsize > 2**32:
@@ -66,26 +75,22 @@ def bjam_build():
     else:
         address_model = ' address-model=32'
 
-    # add extra quoting around the path to prevent bjam from parsing it as a list
-    # if the path has spaces
-    os.environ['LIBTORRENT_PYTHON_INTERPRETER'] = '"' + sys.executable + '"'
+    # don't force current Python interpreter if it was already specified in user-config.jam
+    # this fixes problem with Boost which causes wrong Python include directories
+    if not os.path.isfile(os.path.expanduser('~/user-config.jam')):
+        # add extra quoting around the path to prevent bjam from parsing it as a list if the path has spaces
+        os.environ['LIBTORRENT_PYTHON_INTERPRETER'] = '"' + sys.executable + '"'
 
     # build libtorrent using bjam and build the installer with distutils
-    cmdline = ('b2 release optimization=space ' + stage + ' --hash' +
+    cmdline = ('b2 release optimization=space stage_module --hash' +
                address_model + toolset + parallel_builds)
     print(cmdline)
     if os.system(cmdline) != 0:
         print('build failed')
         sys.exit(1)
 
-    # prepare directories
-    shutil.rmtree('build', ignore_errors=True)
-    shutil.rmtree('libtorrent', ignore_errors=True)
-    os.makedirs('build/lib')
-    os.makedirs('libtorrent')
-
     # copy compiled libtorrent into correct directory
-    shutil.copy2(glob.glob('libtorrent.*' + file_ext)[0], 'build/lib')
+    shutil.copy2(glob.glob('libtorrent*' + file_ext)[0], 'build/lib')
 
     return None
 
@@ -114,11 +119,8 @@ def distutils_build():
 with open('README.rst') as f:
     readme = f.read()
 
-ext = None
-
-if '--help' not in sys.argv and '--help-commands' not in sys.argv:
-    ext = bjam_build()
-    # ext = distutils_build()
+ext = bjam_build()
+# ext = distutils_build()
 
 shutil.copy2('../../COPYING', 'COPYING')
 shutil.copy2('../../LICENSE', 'LICENSE')

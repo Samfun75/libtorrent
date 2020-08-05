@@ -25,6 +25,20 @@ if $(LIBTORRENT_PYTHON_INTERPRETER)
 	using python : : "$(LIBTORRENT_PYTHON_INTERPRETER)" : : : <libtorrent-python>on ;
 }
 
+local versions = [ feature.values python ] ;
+local version ;
+for local v in $(versions)
+{
+	version = $(v) ;
+}
+
+# if this fails, it is most likely because you didn't specify Python version
+# specify it either as LIBTORRENT_PYTHON_INTERPRETER environment variable
+# or using configuration file
+local lib-version = [ SHELL "printf $(version) | sed -e 's/\\.//g' | xargs printf" ] ;
+
+echo "using python version:" $(version) ;
+
 # copied from boost 1.63's boost python jamfile
 rule find-py3-version
 {
@@ -78,9 +92,9 @@ else
 	;
 
 	# the names are decorated in brew
-	lib boost_python : : <target-os>darwin <name>boost_python27-mt
+	lib boost_python : : <target-os>darwin <name>boost_python$(lib-version)-mt
 		: : $(boost-include-path) ;
-	lib boost_python3 : : <target-os>darwin <name>boost_python37-mt
+	lib boost_python3 : : <target-os>darwin <name>boost_python$(lib-version)-mt
 		: : $(boost-include-path) ;
 
 	lib boost_python : : <name>boost_python
@@ -153,6 +167,7 @@ rule libtorrent_linking ( properties * )
 	else
 	{
 		result += <library>$(boost_python_lib)/<link>static/<warnings>off ;
+		result += <define>BOOST_PYTHON_STATIC_LIB ;
 	}
 
 	if <libtorrent-link>shared in $(properties)

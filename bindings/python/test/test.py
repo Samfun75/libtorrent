@@ -16,6 +16,7 @@ import tempfile
 import socket
 import select
 
+
 bindings = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.putenv('PYTHONPATH', bindings)
 sys.path.append(bindings)
