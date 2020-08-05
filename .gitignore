@@ -73,6 +73,15 @@ bindings/python/compile_cmd
 bindings/python/COPYING
 bindings/python/LICENSE
 
+# python build and test data
+bindings/python/bin
+bindings/python/build
+bindings/python/dist
+bindings/python/dependencies
+bindings/python/libtorrent
+bindings/python/libtorrent.*
+bindings/python/**/*.torrent
+
 # binaries in the examples directory
 examples/bt_get
 examples/bt_get2
