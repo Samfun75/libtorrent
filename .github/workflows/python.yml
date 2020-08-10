@@ -16,12 +16,21 @@ env:
 
 jobs:
   build:
-    name: Building and testing on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Building and testing on ${{ matrix.config.os }} ${{ matrix.config.architecture }}
+    runs-on: ${{ matrix.config.os }}
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        config:
+        - {os: ubuntu-latest, architecture: "*x86_64" }
+        - {os: ubuntu-latest, architecture: "*i686" }
+        - {os: windows-latest, architecture: "*amd64" }
+        - {os: windows-latest, architecture: "*win32" }
+        - {os: macos-latest, architecture: "*x86_64" }
+
+    env:
+      CIBW_BUILD: ${{ matrix.config.architecture }}
 
     steps:
     - name: Checkout repository
@@ -29,7 +38,7 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up Python ${{ matrix.python_version }}
+    - name: Set up Python
       uses: actions/setup-python@v1
       with:
         python-version: 3.7
