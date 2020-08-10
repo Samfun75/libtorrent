@@ -78,4 +78,26 @@ jobs:
       if: success() || failure()
       uses: actions/upload-artifact@v2
       with:
+        name: wheels
         path: ./wheelhouse/*.whl
+
+  publish:
+    name: Publishing package to PyPI
+    runs-on: ubuntu-latest
+
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
+    needs: [build]
+
+    steps:
+    - name: Download artifacts from storage
+      uses: actions/download-artifact@v2
+      with:
+        name: wheels
+        path: dist
+
+    - name: Publish artifacts to PyPI
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/ # For testing
