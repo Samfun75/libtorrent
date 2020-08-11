@@ -3,4 +3,11 @@
 identifier=dev
 commit=$(git log -1 --format=format:%h)
 
-sed -E "s/version='(.*)',/version='\1-$identifier+$commit',/g" -i $1
+regex="s/version='(.*)',/version='\1-$identifier+$commit',/g"
+
+if [[ "$OSTYPE" == "darwin"* ]]
+then
+  sed -i '' -E $regex $1
+else
+  sed -E $regex -i $1
+fi
