@@ -21,7 +21,7 @@ feature libtorrent-python : on ;
 
 if $(LIBTORRENT_PYTHON_INTERPRETER)
 {
-	echo "using python interpreter at: " $(LIBTORRENT_PYTHON_INTERPRETER) ;
+	ECHO "using python interpreter at: " $(LIBTORRENT_PYTHON_INTERPRETER) ;
 	using python : : "$(LIBTORRENT_PYTHON_INTERPRETER)" : : : <libtorrent-python>on ;
 }
 
@@ -32,12 +32,12 @@ for local v in $(versions)
 	version = $(v) ;
 }
 
-# if this fails, it is most likely because you didn't specify Python version
-# specify it either as LIBTORRENT_PYTHON_INTERPRETER environment variable
-# or using configuration file
-local lib-version = [ SHELL "printf $(version) | sed -e 's/\\.//g' | xargs printf" ] ;
-
-echo "using python version:" $(version) ;
+local lib-version = 3 ;
+if $(version)
+{
+	ECHO "using python version:" $(version) ;
+	lib-version = [ SHELL "printf $(version) | sed -e 's/\\.//g' | xargs printf" ] ;
+}
 
 # copied from boost 1.63's boost python jamfile
 rule find-py3-version
