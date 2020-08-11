@@ -42,10 +42,10 @@ fi
 # Get number of CPU cores
 cores=$(python -c "import multiprocessing; print(multiprocessing.cpu_count(), end='')")
 
-# Install Boost without Python
+# Install Boost System
 cd /tmp/boost_1_73_0
 rm -f project-config.jam
-./bootstrap.sh --without-libraries=python $prefix
+./bootstrap.sh --with-libraries=system $prefix
 ./b2 install release $toolset --layout=tagged $prefix -j$cores
 
 # Install Boost Build
