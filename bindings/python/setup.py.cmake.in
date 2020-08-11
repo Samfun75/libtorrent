@@ -1,7 +1,36 @@
+#!/usr/bin/env python3
+
+
 from setuptools import setup
+import shutil
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+
+    class bdist_wheel(_bdist_wheel):
+        def finalize_options(self):
+            _bdist_wheel.finalize_options(self)
+            self.root_is_pure = False
+except ImportError:
+    bdist_wheel = None
+
+try:
+    from distutils.command.install import install as _install
+
+    class install(_install):
+        def finalize_options(self):
+            self.install_lib = self.install_platlib
+            _install.finalize_options(self)
+except ImportError:
+    install = None
+
 
 with open('README.rst') as f:
     readme = f.read()
+
+shutil.copy2('../../COPYING', 'COPYING')
+shutil.copy2('../../LICENSE', 'LICENSE')
 
 setup(
     name='libtorrent',
@@ -10,7 +39,7 @@ setup(
     license='BSD',
 
     version='@libtorrent_VERSION@',
-    package_dir={'': '@CMAKE_CURRENT_BINARY_DIR@'}
+    package_dir={'': '@CMAKE_CURRENT_BINARY_DIR@'},
 
     author='Arvid Norberg',
     author_email='arvid@libtorrent.org',
@@ -30,4 +59,9 @@ setup(
         'Topic :: System :: Networking',
         'Topic :: Utilities',
     ],
+
+    cmdclass={
+        'bdist_wheel': bdist_wheel,
+        'install': install,
+    },
 )

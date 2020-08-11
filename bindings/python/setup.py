@@ -12,6 +12,7 @@ import multiprocessing
 
 try:
     from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+
     class bdist_wheel(_bdist_wheel):
         def finalize_options(self):
             _bdist_wheel.finalize_options(self)
@@ -19,11 +20,15 @@ try:
 except ImportError:
     bdist_wheel = None
 
-from distutils.command.install import install as _install
-class install(_install):
-    def finalize_options(self):
-        self.install_lib = self.install_platlib
-        _install.finalize_options(self)
+try:
+    from distutils.command.install import install as _install
+
+    class install(_install):
+        def finalize_options(self):
+            self.install_lib = self.install_platlib
+            _install.finalize_options(self)
+except ImportError:
+    install = None
 
 
 def bjam_build():
