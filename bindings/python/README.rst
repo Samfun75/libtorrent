@@ -2,7 +2,7 @@ libtorrent
 ----------
 
 This package provides Python bindings for libtorrent. See `documentation
-<http://libtorrent.org/python_binding.html>`_ of Python bindings for more details.
+<https://libtorrent.org/python_binding.html>`_ of Python bindings for more details.
 
 libtorrent is an open source C++ library implementing the BitTorrent protocol,
 along with most popular extensions, making it suitable for real world

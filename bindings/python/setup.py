@@ -44,6 +44,15 @@ def bjam_build():
 
     toolset = ''
     file_ext = '.so'
+    static_link = True
+
+    if '--static-link' in sys.argv:
+        del sys.argv[sys.argv.index('--static-link')]
+        static_link = True
+
+    if '--shared-link' in sys.argv:
+        del sys.argv[sys.argv.index('--shared-link')]
+        static_link = False
 
     if platform.system() == 'Windows':
         file_ext = '.pyd'
@@ -68,10 +77,10 @@ def bjam_build():
             toolset = ' toolset=msvc'
 
         # on windows, just link all the dependencies together to keep it simple
-        toolset += ' libtorrent-link=static boost-link=static'
+        toolset += ' boost-link=static'
+        static_link = True
 
-    # statically link libtorrent when building wheel
-    if 'bdist_wheel' in sys.argv and platform.system() != 'Windows':
+    if static_link:
         toolset += ' libtorrent-link=static'
 
     parallel_builds = ' -j%d' % multiprocessing.cpu_count()
