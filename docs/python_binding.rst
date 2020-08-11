@@ -290,7 +290,7 @@ is what ``fileno()`` returns on a socket.
 Example
 =======
 
-For an example python program, see ``client.py`` in the ``bindings/python/example``
+For an example python program, see ``client.py`` in the ``bindings/python/examples``
 directory.
 
 A very simple example usage of the module would be something like this:
