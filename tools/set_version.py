@@ -71,7 +71,7 @@ def substitute_file(name):
         subst += line
 
     f.close()
-    open(name, 'w+').write(subst)
+    open(name, 'w+', newline='\n').write(subst)
 
 
 substitute_file('include/libtorrent/version.hpp')
