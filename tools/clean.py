@@ -44,6 +44,7 @@ def clean():
         '.lib',
         'checking_benchmark',
         'cpu_benchmark',
+        '*.egg-info',
     ]
 
     directories = [
