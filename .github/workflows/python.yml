@@ -44,7 +44,7 @@ jobs:
         python-version: 3.7
 
     - name: Use development version for package
-      if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/heads')
+      if: startsWith(github.event.ref, 'refs/heads') || startsWith(github.event.ref, 'refs/pull')
       run: bash bindings/python/tools/update_development_version.sh bindings/python/setup.py
 
     - name: Cache Boost on Windows
