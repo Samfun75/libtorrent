@@ -2,7 +2,6 @@
 
 
 from setuptools import setup
-import shutil
 
 
 try:
@@ -26,16 +25,10 @@ except ImportError:
     install = None
 
 
-with open('README.rst') as f:
-    readme = f.read()
-
-shutil.copy2('../../COPYING', 'COPYING')
-shutil.copy2('../../LICENSE', 'LICENSE')
-
 setup(
     name='libtorrent',
     description='Python bindings for libtorrent-rasterbar',
-    long_description=readme,
+    long_description=None,
     license='BSD',
 
     version='@libtorrent_VERSION@',
