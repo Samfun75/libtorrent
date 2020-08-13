@@ -2,9 +2,11 @@ name: Python bindings
 on: [push, pull_request]
 
 env:
+  CIBW_ENVIRONMENT_LINUX: CCACHE_DIR=/host/home/runner/.ccache
   CIBW_ENVIRONMENT_WINDOWS: PATH="$PATH;C:\\Boost\\bin" LIB="$LIB;C:\\Boost\\lib" INCLUDE="C:\\Boost\\include" VSCMD_ARG_TGT_ARCH=""
   CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.14
 
+  CIBW_BEFORE_ALL: bash {package}/bindings/python/tools/install_compiler_cache.sh
   CIBW_BEFORE_BUILD: bash {package}/bindings/python/tools/install_boost.sh {package}
   CIBW_TEST_COMMAND: python {package}/bindings/python/test/test.py -b
 
@@ -45,6 +47,14 @@ jobs:
     - name: Use development version for package
       if: startsWith(github.event.ref, 'refs/heads') || startsWith(github.event.ref, 'refs/pull')
       run: bash bindings/python/tools/update_development_version.sh bindings/python/setup.py
+
+    - name: Cache with ccache on Linux
+      if: runner.os == 'Linux'
+      uses: actions/cache@v2
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-${{ matrix.config.architecture }}-ccache-${{ github.sha }}
+        restore-keys: ${{ runner.os }}-${{ matrix.config.architecture }}-ccache-
 
     - name: Cache Boost on Windows
       if: runner.os == 'Windows'
