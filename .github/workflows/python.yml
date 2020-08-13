@@ -5,8 +5,7 @@ env:
   CIBW_ENVIRONMENT_WINDOWS: PATH="$PATH;C:\\Boost\\bin" LIB="$LIB;C:\\Boost\\lib" INCLUDE="C:\\Boost\\include" VSCMD_ARG_TGT_ARCH=""
   CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.14
 
-  CIBW_BEFORE_ALL: bash {package}/bindings/python/tools/install_boost.sh {package}
-  CIBW_BEFORE_BUILD: bash {package}/bindings/python/tools/install_boost_python.sh {package}
+  CIBW_BEFORE_BUILD: bash {package}/bindings/python/tools/install_boost.sh {package}
   CIBW_TEST_COMMAND: python {package}/bindings/python/test/test.py -b
 
   CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014

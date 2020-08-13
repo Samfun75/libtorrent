@@ -35,7 +35,7 @@ for local v in $(versions)
 local lib-version = 3 ;
 if $(version)
 {
-	ECHO "using python version:" $(version) ;
+	ECHO "using python version: " $(version) ;
 	lib-version = [ SHELL "printf $(version) | sed -e 's/\\.//g' | xargs printf" ] ;
 }
 
