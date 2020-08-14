@@ -145,7 +145,7 @@ setup(
     long_description=readme,
     license='BSD',
 
-    version='2.0.0',
+    version='2.0.0-rc3',
 
     packages=['libtorrent'],
     ext_modules=ext,
