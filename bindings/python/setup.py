@@ -140,7 +140,7 @@ shutil.copy2('../../COPYING', 'COPYING')
 shutil.copy2('../../LICENSE', 'LICENSE')
 
 setup(
-    name='libtorrent',
+    name='libtorrent-test',
     description='Python bindings for libtorrent-rasterbar',
     long_description=readme,
     license='BSD',
