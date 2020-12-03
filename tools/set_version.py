@@ -59,7 +59,10 @@ def substitute_file(name):
         elif 'VERSION=' in line and name.endswith('Makefile'):
             line = 'VERSION=%d.%d.%d\n' % (version[0], version[1], version[2])
         elif 'version=' in line and name.endswith('setup.py'):
-            line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
+            line = "    version='%d.%d.%d" % (version[0], version[1], version[2])
+            if len(sys.argv) >= 6:
+                line += '-' + sys.argv[5]
+            line += "',\n"
         elif "version = '" in line and name.endswith('setup.py'):
             line = "    version='%d.%d.%d',\n" % (version[0], version[1], version[2])
         elif '"-LT' in line and name.endswith('settings_pack.cpp'):
@@ -68,7 +71,7 @@ def substitute_file(name):
         subst += line
 
     f.close()
-    open(name, 'w+').write(subst)
+    open(name, 'w+', newline='\n').write(subst)
 
 
 substitute_file('include/libtorrent/version.hpp')

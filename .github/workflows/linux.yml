@@ -195,7 +195,7 @@ jobs:
       - name: run python tests
         run: |
           cd bindings/python
-          LD_LIBRARY_PATH=./dependencies python3 test.py
+          LD_LIBRARY_PATH=./dependencies python3 test/test.py
 
    dist:
       name: build dist

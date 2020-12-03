@@ -108,4 +108,4 @@ jobs:
       - name: run python tests
         run: |
           cd bindings/python
-          DYLD_LIBRARY_PATH=./dependencies python3 test.py
+          DYLD_LIBRARY_PATH=./dependencies python3 test/test.py
