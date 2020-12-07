@@ -180,6 +180,9 @@ running the build.
 Alternatively, Python tools like auditwheel and delocate can be used to detect
 shared libraries and statically include them into the wheel.
 
+The build script will auto-detect toolset for the current system. You can also
+specify `--toolset` argument to force a different toolset.
+
 Building and installing package
 -------------------------------
 
@@ -203,7 +206,7 @@ The package will be installed along with other installed Python packages, either
 globally or into a virtual environment. It can be imported and used just like any
 other Python package.
 
-The same linking principles apply as when just creating the wheel. See the above
+The same linking and toolset configuration principles apply as when just creating the wheel. See the above
 section for more details.
 
 Building directly using Boost Build

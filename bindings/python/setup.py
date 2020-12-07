@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import distutils.debug
 import os
 import pathlib
@@ -20,7 +18,7 @@ def get_msvc_toolset():
         return "msvc-9.0"
     if major_minor in ((3, 3), (3, 4)):
         return "msvc-10.0"
-    if major_minor in ((3, 5), (3, 6), (3, 7), (3, 8), (3, 9)):
+    if major_minor in ((3, 5), (3, 6)):
         return "msvc-14.1"  # libtorrent requires VS 2017 or newer
     # unknown python version
     return "msvc"
@@ -103,7 +101,6 @@ def write_b2_python_config(target, config):
     using = f'using python : {sysconfig.get_python_version()} : {escape(sys.executable)} : {" ".join(escape(path) for path in includes)} : : <libtorrent-python>on : "{target}" ;\n'
     print(using)
     write(using)
-
 
 BuildExtBase = _build_ext_lib.build_ext
 
