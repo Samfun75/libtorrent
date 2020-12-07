@@ -69,7 +69,7 @@ def bjam_build():
         return None
 
     toolset = parse_option_arguments('toolset')
-    file_ext = '.dll' if platform.system() == 'Windows' else '.so'
+    file_ext = '.pyd' if platform.system() == 'Windows' else '.so'
 
     libtorrent_link_static = parse_linking_arguments('libtorrent')
     boost_link_static = parse_linking_arguments('boost')
