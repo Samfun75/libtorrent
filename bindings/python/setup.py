@@ -45,6 +45,18 @@ def parse_linking_arguments(library):
         return True if platform.system() == 'Windows' else False
 
 
+def parse_option_arguments(option, default=None):
+    for arg in sys.argv:
+        if arg.startswith('--{}='.format(option)):
+            del sys.argv[sys.argv.index(arg)]
+            return ' ' + arg
+
+    if default:
+        return ' ' + option + '=' + default
+    else:
+        return ''
+
+
 def bjam_build():
     # prepare directories
     shutil.rmtree('build', ignore_errors=True)
@@ -53,17 +65,16 @@ def bjam_build():
     os.makedirs('libtorrent')
 
     # don't build libtorrent when using commands that were not supposed to use built extension
-    if any(cmd in ['--help', '--help-commands', 'clean', 'sdist', 'dist_info', 'egg_info'] for cmd in sys.argv):
+    if not any(cmd.startswith(('build', 'install', 'bdist')) for cmd in sys.argv):
         return None
 
-    toolset = ''
-    file_ext = '.so'
+    toolset = parse_option_arguments('toolset')
+    file_ext = '.dll' if platform.system() == 'Windows' else '.so'
 
     libtorrent_link_static = parse_linking_arguments('libtorrent')
     boost_link_static = parse_linking_arguments('boost')
 
-    if platform.system() == 'Windows':
-        file_ext = '.pyd'
+    if platform.system() == 'Windows' and not toolset:
         # https://packaging.python.org/guides/packaging-binary-extensions/#binary-extensions-for-windows
         #
         # See https://wiki.python.org/moin/WindowsCompilers for a table of msvc versions
@@ -78,7 +89,7 @@ def bjam_build():
             toolset = ' toolset=msvc-9.0'
         elif sys.version_info[0:2] in ((3, 3), (3, 4)):
             toolset = ' toolset=msvc-10.0'
-        elif sys.version_info[0:2] in ((3, 5), (3, 6), (3, 7), (3, 8)):
+        elif sys.version_info[0:2] in ((3, 5), (3, 6), (3, 7), (3, 8), (3, 9)):
             toolset = ' toolset=msvc-14.2'  # libtorrent requires VS 2017 or newer
         else:
             # unknown python version, lets hope the user has the right version of msvc configured
