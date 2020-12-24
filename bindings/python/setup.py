@@ -150,9 +150,9 @@ class LibtorrentBuildExt(BuildExtBase):
 
     def build_extension_with_b2(self):
         if os.name == "nt":
-            self.toolset = get_msvc_toolset()
-            self.libtorrent_link = "static"
-            self.boost_link = "static"
+            self.toolset = get_msvc_toolset() if not self.toolset else self.toolset
+            self.libtorrent_link = "static" if not self.libtorrent_link else self.libtorrent_link
+            self.boost_link = "static" if not self.boost_link else self.boost_link
 
         args = []
 
@@ -170,6 +170,8 @@ class LibtorrentBuildExt(BuildExtBase):
             args.append(f"-j{self.parallel}")
         else:
             args.append(f"-j{multiprocessing.cpu_count()}")
+        if self.toolset:
+            args.append(f"toolset={self.toolset}")
         if self.libtorrent_link:
             args.append(f"libtorrent-link={self.libtorrent_link}")
         if self.boost_link:
