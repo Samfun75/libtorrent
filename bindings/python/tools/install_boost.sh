@@ -74,6 +74,15 @@ then
   cd /tmp/boost_1_75_0/tools/build
   ./bootstrap.sh
   ./b2 install release $toolset -j$cores
+
+  # Create boost-build.jam file
+  # This is needed because Boost Build since 1.74 does not auto-generate it
+  if [[ "$OSTYPE" == "msys" ]]
+  then
+    printf "boost-build src/kernel ;\n" > /c/Boost/share/boost-build/boost-build.jam
+  else
+    printf "boost-build src/kernel ;\n" > /usr/local/share/boost-build/boost-build.jam
+  fi
 fi
 
 # Install Boost.Python
