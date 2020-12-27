@@ -43,8 +43,6 @@ clean: FORCE
     bin \
     examples/bin \
     tools/bin \
-    bindings/python/COPYING \
-    bindings/python/LICENSE \
     bindings/python/bin \
     bindings/python/build \
     bindings/python/dist \
